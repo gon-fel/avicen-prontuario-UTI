@@ -1,0 +1,10 @@
+{
+  "description": "Organizes ICU patient records, vital signs, clinical alerts, and pending tasks for Brazilian hospital care teams, helping clinicians prioritize urgent needs.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
