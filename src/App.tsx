@@ -809,14 +809,16 @@ function PatientPrescriptionTab({ patient, role, onRoleChange, onNotify, risks, 
   medications: MedicationOrder[]; prescriptionItems: PrescriptionItem[]; prescriptionStatus: string; schedule: MedicationSchedule; scheduleApproved: boolean; versions: PrescriptionVersion[]
 }) {
   const sortedVersions = [...versions].sort((a, b) => b.version - a.version)
+  const [recordsVersion, setRecordsVersion] = useState(0)
+  const onRecordsChange = () => setRecordsVersion((current) => current + 1)
   return (
     <>
       <section className="record-section">
         <div className="record-section-head">
-          <div><div className="record-section-title">Prescrição médica vigente</div><p>Prescrição médica, checagem e SAE reunidas em uma única visualização</p></div>
+          <div><div className="record-section-title">Prescrição médica vigente</div><p>Itens prescritos e horários de administração aprazados pela enfermagem</p></div>
           <span className={`prescription-version-status ${prescriptionStatus === 'Vigente' ? 'vigente' : prescriptionStatus === 'Expirada' ? 'expirada' : prescriptionStatus === 'Suspensa' ? 'suspensa' : 'legacy'}`}>{prescriptionStatus}</span>
         </div>
-        <PrescriptionItemsList items={prescriptionItems} prescriptionStatus={prescriptionStatus} />
+        <PrescriptionScheduleList items={prescriptionItems} schedule={schedule} approved={scheduleApproved} prescriptionStatus={prescriptionStatus} bed={patient.bed} onNotify={onNotify} onRecordsChange={onRecordsChange} />
       </section>
 
       <AdministrationScreen
@@ -824,6 +826,8 @@ function PatientPrescriptionTab({ patient, role, onRoleChange, onNotify, risks, 
         role={role}
         onChangeRole={onRoleChange}
         onNotify={onNotify}
+        recordsVersion={recordsVersion}
+        onRecordsChange={onRecordsChange}
         medications={medications}
         prescriptionItems={prescriptionItems}
         prescriptionStatus={prescriptionStatus}
@@ -1919,6 +1923,172 @@ function PrescriptionItemsList({ items, prescriptionStatus }: { items: Prescript
   )
 }
 
+const nonAdministrationReasons = ['Recusa expressa do paciente', 'Condição clínica impeditiva', 'Ausência no leito (Exame/TC)', 'Acesso venoso inviável', 'Item em falta na farmácia']
+
+function readAdministrationRecords(bed: string): Record<string, AdministrationRecord> {
+  try { return JSON.parse(localStorage.getItem(`avicen-administration-${bed}`) || '{}') as Record<string, AdministrationRecord> } catch { return {} }
+}
+
+function saveAdministrationRecord(bed: string, key: string, record: AdministrationRecord) {
+  localStorage.setItem(`avicen-administration-${bed}`, JSON.stringify({ ...readAdministrationRecords(bed), [key]: record }))
+}
+
+function ScheduleTimeStrip({ times, next, statusOf, onOpen }: { times: string[]; next?: string; statusOf: (time: string) => AdministrationRecord['status'] | undefined; onOpen: (time: string) => void }) {
+  const stripRef = useRef<HTMLDivElement>(null)
+  const scrollStrip = (direction: number) => stripRef.current?.scrollBy({ left: direction * 160, behavior: 'smooth' })
+
+  return (
+    <div className="prescription-time-strip">
+      <button type="button" className="prescription-strip-nav" aria-label="Ver horários anteriores" onClick={() => scrollStrip(-1)}>‹</button>
+      <div className="prescription-time-track" ref={stripRef}>
+        {times.map((time) => {
+          const status = statusOf(time)
+          const stateClass = status === 'Administrado' ? 'checked' : status === 'Não administrado' ? 'bolado' : ''
+          return (
+            <button
+              type="button"
+              key={time}
+              className={`prescription-time-chip ${time === next ? 'next' : ''} ${stateClass}`}
+              title="Duplo clique para checar ou bolar"
+              onDoubleClick={() => onOpen(time)}
+              onKeyDown={(event) => { if (event.key === 'Enter') onOpen(time) }}
+            >
+              <span className="time-icon"><Icon name="clock" size={11} /></span>{time}
+            </button>
+          )
+        })}
+      </div>
+      <button type="button" className="prescription-strip-nav" aria-label="Ver próximos horários" onClick={() => scrollStrip(1)}>›</button>
+    </div>
+  )
+}
+
+function PrescriptionScheduleList({ items, schedule, approved, prescriptionStatus, bed, onNotify, onRecordsChange }: { items: PrescriptionItem[]; schedule: MedicationSchedule; approved: boolean; prescriptionStatus: string; bed: string; onNotify: (message: string) => void; onRecordsChange: () => void }) {
+  const [dialog, setDialog] = useState<{ item: PrescriptionItem; time: string; key: string } | null>(null)
+  const [dialogMode, setDialogMode] = useState<'choose' | 'bolar'>('choose')
+  const [reason, setReason] = useState('')
+  const [justification, setJustification] = useState('')
+  const [dialogError, setDialogError] = useState('')
+  const records = readAdministrationRecords(bed)
+  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes()
+  const sortedTimes = (itemId: number) => [...(schedule[itemId] ?? [])].sort((a, b) => scheduleHours.indexOf(a) - scheduleHours.indexOf(b))
+  const nextDose = items
+    .filter((item) => item.category === 'Medicamentos' && item.status === 'Ativa')
+    .flatMap((item) => sortedTimes(item.id).map((time) => {
+      const [hour, minute] = time.split(':').map(Number)
+      return { item, time, wait: (hour * 60 + minute - nowMinutes + 1440) % 1440 }
+    }))
+    .sort((a, b) => a.wait - b.wait)[0]
+
+  const closeDialog = () => { setDialog(null); setDialogMode('choose'); setReason(''); setJustification(''); setDialogError('') }
+  const openSchedule = (item: PrescriptionItem, time: string) => {
+    if (!approved) { onNotify('Grade aguardando homologação: somente horários homologados pela enfermeira podem ser checados.'); return }
+    const key = `${item.id}-${time}`
+    const existing = records[key]
+    if (existing) { onNotify(`${item.name} às ${time}: já registrado como ${existing.status.toLowerCase()}.`); return }
+    setDialog({ item, time, key })
+  }
+  const currentTime = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+  const registerCheck = () => {
+    if (!dialog) return
+    saveAdministrationRecord(bed, dialog.key, { status: 'Administrado', time: currentTime() })
+    onRecordsChange()
+    onNotify(`${dialog.item.name} às ${dialog.time}: administração checada.`)
+    closeDialog()
+  }
+  const registerBolar = () => {
+    if (!dialog) return
+    if (!reason || !justification.trim()) { setDialogError('Selecione um motivo e informe a descrição / justificativa.'); return }
+    saveAdministrationRecord(bed, dialog.key, { status: 'Não administrado', time: currentTime(), reason, justification: justification.trim() })
+    onRecordsChange()
+    onNotify(`${dialog.item.name} às ${dialog.time}: medicação bolada.`)
+    closeDialog()
+  }
+
+  let itemNumber = 0
+  const groups = prescriptionCategoryOrder.map((category) => ({
+    category,
+    items: items.filter((item) => item.category === category),
+  })).filter((group) => group.items.length > 0)
+  const showStatus = (item: PrescriptionItem) => prescriptionStatus === 'Expirada' || prescriptionStatus === 'Suspensa' ? prescriptionStatus : item.status
+
+  return (
+    <div className="prescription-items-list">
+      {approved && nextDose && (
+        <div className="prescription-next-dose">Próximo horário: <strong>{nextDose.time}</strong> · {nextDose.item.name}</div>
+      )}
+      {groups.map((group) => (
+        <section className="prescription-category-group" key={group.category}>
+          <div className="prescription-category-heading"><strong>{group.category}</strong><span>{group.items.length} item(ns)</span></div>
+          {group.items.map((item) => {
+            itemNumber += 1
+            const status = showStatus(item)
+            const statusClass = status === 'Suspensa' ? 'suspensa' : status === 'Expirada' ? 'expirada' : ''
+            if (item.category !== 'Medicamentos') {
+              const details = item.category === 'Dietas'
+                ? [item.route && `Via ${item.route}`, item.volume, item.speed && `Infusão ${item.speed}`].filter(Boolean).join(' · ')
+                : item.details || '—'
+              return (
+                <div className="prescription-items-table prescription-item-row" key={item.id}>
+                  <span className="prescription-item-number">Item {itemNumber}</span>
+                  <strong>{item.name}</strong>
+                  <span>{details}</span>
+                  <b className={`prescription-item-status ${statusClass}`}>{status}</b>
+                </div>
+              )
+            }
+            const details = [item.dose, item.route && `Via ${item.route}`, item.diluent, item.volume, item.speed, item.frequency, item.details].filter(Boolean).join(' · ')
+            const times = sortedTimes(item.id)
+            return (
+              <div className="prescription-schedule-row" key={item.id}>
+                <div className="prescription-schedule-info">
+                  <span className="prescription-item-number">Item {itemNumber} <b className={`prescription-item-status ${statusClass}`}>{status}</b></span>
+                  <strong>{item.name}</strong>
+                  <span>{details}</span>
+                </div>
+                {times.length
+                  ? <ScheduleTimeStrip
+                      times={times}
+                      next={nextDose && approved && nextDose.item.id === item.id ? nextDose.time : undefined}
+                      statusOf={(time) => records[`${item.id}-${time}`]?.status}
+                      onOpen={(time) => openSchedule(item, time)}
+                    />
+                  : <div className="prescription-time-empty">{approved ? 'Sem horário aprazado' : 'Aguardando aprazamento da enfermagem'}</div>}
+              </div>
+            )
+          })}
+        </section>
+      ))}
+      {!items.length && <div className="medication-empty">Nenhum item de prescrição registrado para este paciente.</div>}
+      {dialog && (
+        <div className="confirmation-layer" role="dialog" aria-modal="true" aria-label="Checar ou bolar medicação">
+          <Button className="confirmation-backdrop" onClick={closeDialog} ariaLabel="Fechar" />
+          <div className="non-admin-modal">
+            <div className="non-admin-modal-head"><div className="confirmation-icon"><Icon name="clock" size={22} /></div><div><strong>{dialogMode === 'choose' ? 'Checar ou bolar medicação' : 'Bolar medicação'}</strong><span>{dialog.item.name} · {dialog.time}</span></div></div>
+            {dialogMode === 'choose' ? (
+              <>
+                <p className="schedule-dialog-text">Escolha o registro para este horário aprazado.</p>
+                <div className="confirmation-actions">
+                  <Button className="secondary-button" onClick={closeDialog}>Cancelar</Button>
+                  <Button className="secondary-button" onClick={() => setDialogMode('bolar')}>Bolar medicação</Button>
+                  <Button className="primary-button" onClick={registerCheck}><Icon name="check" size={15} /> Checar medicação</Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label><span>Motivo obrigatório <b>*</b></span><select value={reason} onChange={(event) => setReason(event.target.value)}><option value="">Selecione...</option>{nonAdministrationReasons.map((option) => <option key={option}>{option}</option>)}</select></label>
+                <label><span>Descrição / Justificativa <b>*</b></span><textarea value={justification} onChange={(event) => setJustification(event.target.value)} placeholder="Descreva a ocorrência e as providências adotadas..." /></label>
+                {dialogError && <div className="balance-form-error"><Icon name="alert" size={14} /><span>{dialogError}</span></div>}
+                <div className="confirmation-actions"><Button className="secondary-button" onClick={() => { setDialogMode('choose'); setDialogError('') }}>Voltar</Button><Button className="danger-button" onClick={registerBolar}>Confirmar não administração</Button></div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function SAEChecklist({ bed, role }: { bed: string; role: ProfessionalRole }) {
   const [records, setRecords] = useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem(`avicen-sae-${bed}`) || '{}') as Record<string, boolean> } catch { return {} }
@@ -2691,8 +2861,8 @@ function SchedulingScreen({ role, onChangeRole, onNotify, schedule, onScheduleCh
 
 type AdministrationRecord = { status: 'Administrado' | 'Não administrado'; time: string; reason?: string; justification?: string }
 
-function AdministrationScreen({ role, onChangeRole, onNotify, schedule, approved, medications, prescriptionItems, prescriptionStatus, patient, risks, activePatients, selectedBed, onSelectedBedChange, embedded = false }: {
-  role: ProfessionalRole; onChangeRole: (role: ProfessionalRole) => void; onNotify: (message: string) => void
+function AdministrationScreen({ role, onChangeRole, onNotify, recordsVersion = 0, onRecordsChange, schedule, approved, medications, prescriptionItems, prescriptionStatus, patient, risks, activePatients, selectedBed, onSelectedBedChange, embedded = false }: {
+  role: ProfessionalRole; onChangeRole: (role: ProfessionalRole) => void; onNotify: (message: string) => void; recordsVersion?: number; onRecordsChange?: () => void
   schedule: MedicationSchedule; approved: boolean; medications: MedicationOrder[]; prescriptionItems: PrescriptionItem[]; prescriptionStatus: string
   patient: Patient; risks: PatientClinicalRisk; activePatients: Patient[]; selectedBed: string; onSelectedBedChange: (bed: string) => void; embedded?: boolean
 }) {
@@ -2701,13 +2871,14 @@ function AdministrationScreen({ role, onChangeRole, onNotify, schedule, approved
   const [reason, setReason] = useState('')
   const [justification, setJustification] = useState('')
   const [modalError, setModalError] = useState('')
-  useEffect(() => { try { setRecords(JSON.parse(localStorage.getItem(`avicen-administration-${selectedBed}`) || '{}') as Record<string, AdministrationRecord>) } catch { setRecords({}) } }, [selectedBed])
+  useEffect(() => { try { setRecords(JSON.parse(localStorage.getItem(`avicen-administration-${selectedBed}`) || '{}') as Record<string, AdministrationRecord>) } catch { setRecords({}) } }, [selectedBed, recordsVersion])
   const checkAdministration = (key: string, name: string) => {
     if (role !== 'tecnico') {
       onNotify('A checagem beira-leito é exclusiva do perfil técnico de enfermagem.')
       return
     }
     setRecords((current) => { const updated = { ...current, [key]: { status: 'Administrado' as const, time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) } }; localStorage.setItem(`avicen-administration-${selectedBed}`, JSON.stringify(updated)); return updated })
+    onRecordsChange?.()
     onNotify(`${name}: administração checada com sucesso.`)
   }
   const confirmNonAdministration = () => {
@@ -2721,6 +2892,7 @@ function AdministrationScreen({ role, onChangeRole, onNotify, schedule, approved
       return
     }
     setRecords((current) => { const updated = { ...current, [nonAdministration.key]: { status: 'Não administrado' as const, time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), reason, justification: justification.trim() } }; localStorage.setItem(`avicen-administration-${selectedBed}`, JSON.stringify(updated)); return updated })
+    onRecordsChange?.()
     setNonAdministration(null); setReason(''); setJustification(''); setModalError('')
     onNotify('Não administração registrada e preservada no histórico.')
   }

@@ -744,6 +744,24 @@
 .prescription-item-row > strong { color: var(--slate-800); }
 .prescription-item-number { color: var(--teal-700); font-size: calc((8px) * var(--font-scale, 1)); font-weight: 750; white-space: nowrap; }
 .prescription-category-group:last-child .prescription-item-row:last-child { border-bottom: 0; }
+.prescription-schedule-row { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.3fr); align-items: center; gap: 14px; padding: 10px 14px; border-bottom: 1px solid var(--slate-150); color: var(--slate-600); font-size: calc((9px) * var(--font-scale, 1)); line-height: 1.45; }
+.prescription-category-group:last-child .prescription-schedule-row:last-child { border-bottom: 0; }
+.prescription-schedule-info { display: grid; gap: 3px; min-width: 0; }
+.prescription-schedule-info > strong { color: var(--slate-800); font-size: calc((10px) * var(--font-scale, 1)); }
+.prescription-schedule-info > .prescription-item-number { display: flex; align-items: center; gap: 8px; }
+.prescription-time-strip { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.prescription-time-track { display: flex; gap: 6px; flex: 1; min-width: 0; overflow-x: auto; scroll-behavior: smooth; padding: 4px 2px; scrollbar-width: thin; }
+.prescription-time-chip { flex: 0 0 auto; display: inline-flex; align-items: center; gap: calc((6px) * var(--font-scale, 1)); padding: 6px 10px; color: var(--teal-700); border: 1px solid var(--teal-700); border-radius: 999px; background: var(--white); font-size: calc((9px) * var(--font-scale, 1)); font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; }
+.prescription-time-chip .time-icon { display: inline-flex; align-items: center; justify-content: center; width: calc((18px) * var(--font-scale, 1)); height: calc((18px) * var(--font-scale, 1)); border-radius: 50%; }
+.prescription-time-chip.next { color: var(--amber-700); border-color: var(--amber-700); background: var(--amber-100); }
+.prescription-time-chip.checked { color: var(--green-700); border-color: var(--green-700); background: var(--green-100); }
+.prescription-time-chip.bolado .time-icon { box-shadow: 0 0 0 2px var(--red-600); color: var(--red-600); }
+.prescription-strip-nav { flex: 0 0 auto; width: 30px; height: 30px; color: var(--slate-700); border: 1px solid var(--slate-300); border-radius: 50%; background: var(--white); font-size: calc((14px) * var(--font-scale, 1)); line-height: 1; cursor: pointer; }
+.prescription-time-empty { color: var(--slate-500); font-style: italic; }
+.prescription-next-dose { padding: 9px 14px; color: var(--amber-700); border-bottom: 1px solid var(--slate-200); background: var(--amber-100); font-size: calc((9px) * var(--font-scale, 1)); font-weight: 600; }
+@media (max-width: 760px) {
+  .prescription-schedule-row { grid-template-columns: 1fr; }
+}
 .nursing-prescription-panel { margin-bottom: 12px; padding-bottom: 12px; overflow: hidden; }
 .nursing-prescription-panel > .med-patient-bar { margin: 0 12px 10px; }
 .nursing-prescription-panel > .prescription-items-list { margin-bottom: 10px; }
