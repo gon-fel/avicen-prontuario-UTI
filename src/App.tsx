@@ -773,7 +773,15 @@ function TrendChart({ values, tone = 'teal', min, max }: {
 type ClinicalNoteKind = 'Médica' | 'Enfermagem' | 'Técnica'
 type ClinicalNote = { id: string; createdAt: string; author: string; kind: ClinicalNoteKind; text: string }
 type ExamStatus = 'Normal' | 'Alterado' | 'Pendente'
-type ExamRecord = { id: string; name: string; collectedAt: string; result: string; status: ExamStatus; report: string }
+type ExamRecord = {
+  id: string; name: string; collectedAt: string; result: string; status: ExamStatus; report: string
+  kind?: 'laboratorio' | 'imagem'
+  responsible?: string
+  executionStatus?: 'Finalizado' | 'Pendente'
+  reportStatus?: 'Liberado' | 'Pendente'
+  demonstration?: boolean
+  parameters?: { name: string; value: string; reference: string; status: 'Normal' | 'Alterado' }[]
+}
 
 const noteKindByRole: Record<ProfessionalRole, ClinicalNoteKind> = { medico: 'Médica', enfermeiro: 'Enfermagem', tecnico: 'Técnica' }
 
@@ -804,62 +812,148 @@ function buildSeedExams(): ExamRecord[] {
   ]
 }
 
-function PatientPrescriptionTab({ patient, role, onRoleChange, onNotify, risks, medications, prescriptionItems, prescriptionStatus, schedule, scheduleApproved, versions }: {
-  patient: Patient; role: ProfessionalRole; onRoleChange: (role: ProfessionalRole) => void; onNotify: (message: string) => void; risks: PatientClinicalRisk
-  medications: MedicationOrder[]; prescriptionItems: PrescriptionItem[]; prescriptionStatus: string; schedule: MedicationSchedule; scheduleApproved: boolean; versions: PrescriptionVersion[]
+function buildDemonstrationExams(): ExamRecord[] {
+  const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3600000).toISOString()
+  return [
+    {
+      id: 'demo-hemograma-completo', name: 'Hemograma completo', collectedAt: hoursAgo(4),
+      kind: 'laboratorio', responsible: 'Profissional fictício', executionStatus: 'Finalizado', reportStatus: 'Liberado',
+      result: 'Resultados ilustrativos dos parâmetros abaixo.', status: 'Alterado',
+      report: 'Laudo demonstrativo fictício, sem finalidade diagnóstica.', demonstration: true,
+      parameters: [
+        { name: 'Hemácias', value: '4,2 milhões/mm³', reference: '4,0–5,5 milhões/mm³', status: 'Normal' },
+        { name: 'Hemoglobina', value: '10,2 g/dL', reference: '12,0–16,0 g/dL', status: 'Alterado' },
+        { name: 'Hematócrito', value: '32%', reference: '36–46%', status: 'Alterado' },
+        { name: 'VCM', value: '86 fL', reference: '80–100 fL', status: 'Normal' },
+        { name: 'HCM', value: '29 pg', reference: '27–33 pg', status: 'Normal' },
+        { name: 'CHCM', value: '33 g/dL', reference: '32–36 g/dL', status: 'Normal' },
+        { name: 'RDW', value: '14,1%', reference: '11,5–14,5%', status: 'Normal' },
+        { name: 'Leucócitos', value: '18.400/mm³', reference: '4.000–11.000/mm³', status: 'Alterado' },
+        { name: 'Neutrófilos', value: '82%', reference: '40–75%', status: 'Alterado' },
+        { name: 'Linfócitos', value: '12%', reference: '20–45%', status: 'Alterado' },
+        { name: 'Monócitos', value: '4%', reference: '2–10%', status: 'Normal' },
+        { name: 'Eosinófilos', value: '1%', reference: '1–6%', status: 'Normal' },
+        { name: 'Basófilos', value: '1%', reference: '0–2%', status: 'Normal' },
+        { name: 'Plaquetas', value: '240.000/mm³', reference: '150.000–450.000/mm³', status: 'Normal' },
+      ],
+    },
+    {
+      id: 'demo-tomografia', name: 'Tomografia de tórax', collectedAt: hoursAgo(6),
+      kind: 'imagem', responsible: 'Profissional fictício', executionStatus: 'Finalizado', reportStatus: 'Liberado',
+      result: 'Ilustrações esquemáticas disponíveis para demonstração.', status: 'Normal',
+      report: 'Laudo demonstrativo fictício, sem finalidade diagnóstica.', demonstration: true,
+    },
+  ]
+}
+
+function isExamRecord(item: unknown): item is ExamRecord {
+  if (!item || typeof item !== 'object') return false
+  const exam = item as Record<string, unknown>
+  const optionalString = (value: unknown) => value === undefined || typeof value === 'string'
+  const parametersValid = exam.parameters === undefined || (Array.isArray(exam.parameters) && exam.parameters.every((item: unknown) => {
+    if (!item || typeof item !== 'object') return false
+    const parameter = item as Record<string, unknown>
+    return typeof parameter.name === 'string' && typeof parameter.value === 'string' && typeof parameter.reference === 'string' &&
+      (parameter.status === 'Normal' || parameter.status === 'Alterado')
+  }))
+  return typeof exam.id === 'string' && typeof exam.name === 'string' &&
+    typeof exam.collectedAt === 'string' && !Number.isNaN(Date.parse(exam.collectedAt)) &&
+    typeof exam.result === 'string' && typeof exam.report === 'string' &&
+    (exam.status === 'Normal' || exam.status === 'Alterado' || exam.status === 'Pendente') &&
+    (exam.kind === undefined || exam.kind === 'laboratorio' || exam.kind === 'imagem') &&
+    optionalString(exam.responsible) &&
+    (exam.executionStatus === undefined || exam.executionStatus === 'Finalizado' || exam.executionStatus === 'Pendente') &&
+    (exam.reportStatus === undefined || exam.reportStatus === 'Liberado' || exam.reportStatus === 'Pendente') &&
+    (exam.demonstration === undefined || typeof exam.demonstration === 'boolean') && parametersValid
+}
+
+function readExams(key: string): { exams: ExamRecord[]; error: string | null } {
+  try {
+    const stored = localStorage.getItem(key)
+    if (stored === null) return { exams: buildSeedExams(), error: null }
+    const parsed: unknown = JSON.parse(stored)
+    if (!Array.isArray(parsed) || !parsed.every(isExamRecord)) {
+      return { exams: [], error: 'Não foi possível ler os exames salvos: os dados estão em formato inválido. Os dados originais foram preservados.' }
+    }
+    return { exams: parsed, error: null }
+  } catch {
+    return { exams: [], error: 'Não foi possível acessar ou ler os exames salvos. Os dados originais foram preservados.' }
+  }
+}
+
+function PatientPrescriptionTab({ patient, onNotify, prescriptionItems, prescriptionStatus, schedule, scheduleApproved, versions }: {
+  patient: Patient; onNotify: (message: string) => void
+  prescriptionItems: PrescriptionItem[]; prescriptionStatus: string; schedule: MedicationSchedule; scheduleApproved: boolean; versions: PrescriptionVersion[]
 }) {
   const sortedVersions = [...versions].sort((a, b) => b.version - a.version)
-  const [recordsVersion, setRecordsVersion] = useState(0)
+  const displayableVersions = sortedVersions.filter((version) => !version.demonstrationHistory)
+  const displayedVersion = displayableVersions.find((version) => version.status === 'Vigente') ?? displayableVersions[0]
+  const validFrom = displayedVersion?.validFrom ? new Date(displayedVersion.validFrom) : null
+  const expiresAt = displayedVersion?.expiresAt ? new Date(displayedVersion.expiresAt) : null
+  const historyVersions = sortedVersions.filter((version) => version.status === 'Suspensa' || (Number.isFinite(Date.parse(version.expiresAt)) && Date.parse(version.expiresAt) <= Date.now()))
+  const [openedVersion, setOpenedVersion] = useState<PrescriptionVersion | null>(null)
+  const [, setRecordsVersion] = useState(0)
   const onRecordsChange = () => setRecordsVersion((current) => current + 1)
+  useEffect(() => {
+    if (!openedVersion) return
+    const handleKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenedVersion(null) }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [openedVersion])
   return (
     <>
       <section className="record-section">
-        <div className="record-section-head">
-          <div><div className="record-section-title">Prescrição médica vigente</div><p>Itens prescritos e horários de administração aprazados pela enfermagem</p></div>
+        <div className="record-section-head prescription-record-head">
+          <div>
+            <div className="record-section-title">{prescriptionStatus === 'Vigente' ? 'Prescrição médica vigente' : 'Prescrição médica'}</div>
+            <p>{displayedVersion ? `Prescrição ${formatPrescriptionNumber(displayedVersion)}` : prescriptionItems.length ? 'Sem número · registro legado' : 'Sem prescrição registrada'}</p>
+            {displayedVersion?.demonstration && <p className="prescription-demo-notice">Exemplo fictício para demonstração · não utilizar na assistência.</p>}
+            <p>{validFrom && expiresAt && !Number.isNaN(validFrom.getTime()) && !Number.isNaN(expiresAt.getTime())
+              ? `Vigência registrada: ${formatLocalDateTime(validFrom)} até ${formatLocalDateTime(expiresAt)}`
+              : 'Vigência não registrada para esta prescrição.'}</p>
+            <p>Grade de horários: 08:00 às 07:00 do dia seguinte.</p>
+          </div>
           <span className={`prescription-version-status ${prescriptionStatus === 'Vigente' ? 'vigente' : prescriptionStatus === 'Expirada' ? 'expirada' : prescriptionStatus === 'Suspensa' ? 'suspensa' : 'legacy'}`}>{prescriptionStatus}</span>
         </div>
         <PrescriptionScheduleList items={prescriptionItems} schedule={schedule} approved={scheduleApproved} prescriptionStatus={prescriptionStatus} bed={patient.bed} onNotify={onNotify} onRecordsChange={onRecordsChange} />
       </section>
 
-      <AdministrationScreen
-        embedded
-        role={role}
-        onChangeRole={onRoleChange}
-        onNotify={onNotify}
-        recordsVersion={recordsVersion}
-        onRecordsChange={onRecordsChange}
-        medications={medications}
-        prescriptionItems={prescriptionItems}
-        prescriptionStatus={prescriptionStatus}
-        patient={patient}
-        risks={risks}
-        activePatients={[patient]}
-        schedule={schedule}
-        approved={scheduleApproved}
-        selectedBed={patient.bed}
-        onSelectedBedChange={() => {}}
-      />
-
       <section className="record-section prescription-history">
         <div className="record-section-head">
-          <div><div className="record-section-title">Histórico de prescrições</div><p>Versões anteriores e vigentes deste atendimento</p></div>
+          <div><div className="record-section-title">Histórico de prescrições</div><p>Prescrições anteriores ou expiradas · duplo clique para consultar</p></div>
         </div>
-        {sortedVersions.map((version) => (
-          <article className="prescription-history-version" key={version.id}>
-            <div className="prescription-history-version-head">
-              <strong>Versão {version.version || 'legada'}</strong>
-              <span>{version.createdAt ? formatLocalDateTime(new Date(version.createdAt)) : 'Data não disponível · registro legado'}</span>
-              <b className={`prescription-version-status ${version.status === 'Suspensa' ? 'suspensa' : 'vigente'}`}>{version.status}</b>
-            </div>
-            {version.validFrom && version.expiresAt && <small>Vigência: {formatLocalDateTime(new Date(version.validFrom))} até {formatLocalDateTime(new Date(version.expiresAt))}</small>}
-            <PrescriptionItemsList items={version.items} prescriptionStatus={version.status} />
-            <small>Responsável: {version.signedBy}</small>
-          </article>
-        ))}
-        {!sortedVersions.length && <div className="prescription-draft-empty">Nenhuma prescrição registrada para este atendimento.</div>}
+        {historyVersions.length ? <div className="prescription-history-scroll">
+          <table className="prescription-history-table">
+            <thead><tr><th scope="col">Número</th><th scope="col">Data</th><th scope="col">Vigência</th><th scope="col">Situação</th><th scope="col">Consulta</th></tr></thead>
+            <tbody>{historyVersions.map((version) => {
+              const status = version.status === 'Suspensa' ? 'Suspensa' : 'Expirada'
+              return <tr key={version.id} onDoubleClick={() => setOpenedVersion(version)}>
+                <td>{formatPrescriptionNumber(version)}{version.demonstration && <small className="prescription-demo-label">Exemplo fictício</small>}</td>
+                <td>{formatStoredPrescriptionDate(version.createdAt)}</td>
+                <td>{formatStoredPrescriptionDate(version.validFrom)} até {formatStoredPrescriptionDate(version.expiresAt)}</td>
+                <td><span className={`prescription-version-status ${status.toLocaleLowerCase('pt-BR')}`}>{status}</span></td>
+                <td><button type="button" className="secondary-button" onClick={() => setOpenedVersion(version)}>Abrir</button></td>
+              </tr>
+            })}</tbody>
+          </table>
+        </div> : <div className="prescription-draft-empty">Nenhuma prescrição anterior ou expirada registrada.</div>}
       </section>
 
-      <SAEChecklist bed={patient.bed} role={role} />
+      {openedVersion && <div className="confirmation-layer" role="dialog" aria-modal="true" aria-labelledby="prescription-history-dialog-title">
+        <button type="button" className="confirmation-backdrop" aria-label="Fechar consulta" onClick={() => setOpenedVersion(null)} />
+        <div className="prescription-history-dialog">
+          <div className="record-section-head">
+            <div><div className="record-section-title" id="prescription-history-dialog-title">Prescrição {formatPrescriptionNumber(openedVersion)}</div>
+              <p>Vigência: {formatStoredPrescriptionDate(openedVersion.validFrom)} até {formatStoredPrescriptionDate(openedVersion.expiresAt)}</p>
+            </div>
+            <button type="button" className="secondary-button" autoFocus onClick={() => setOpenedVersion(null)}>Fechar</button>
+          </div>
+          <p>Consulta somente de leitura. Os horários históricos não estão disponíveis por versão.</p>
+          {openedVersion.demonstration && <p className="prescription-demo-notice">Exemplo fictício para demonstração · não utilizar na assistência.</p>}
+          <PrescriptionItemsList items={openedVersion.items} prescriptionStatus={openedVersion.status === 'Suspensa' ? 'Suspensa' : 'Expirada'} />
+          <p>Responsável: {openedVersion.signedBy || 'Não registrado'}</p>
+        </div>
+      </div>}
     </>
   )
 }
@@ -933,60 +1027,93 @@ function ClinicalNotesSection({ patient, role, onNotify, anamnesisValidation, on
   )
 }
 
-function ExamsSection({ patient, role, onNotify }: { patient: Patient; role: ProfessionalRole; onNotify: (message: string) => void }) {
+function ExamsSection({ patient }: { patient: Patient }) {
   const storageKey = `avicen-exams-${patient.admission}`
-  const [exams, setExams] = useState<ExamRecord[]>(() => readStoredList(storageKey, buildSeedExams))
-  const [draft, setDraft] = useState<{ name: string; result: string; status: ExamStatus; report: string }>({ name: '', result: '', status: 'Pendente', report: '' })
-  const professional = professionals[role]
-  useEffect(() => { localStorage.setItem(storageKey, JSON.stringify(exams)) }, [storageKey, exams])
-
-  const addExam = () => {
-    if (!draft.name.trim() || !draft.result.trim()) {
-      onNotify('Informe o nome do exame e o resultado para registrar.')
-      return
-    }
-    const exam: ExamRecord = { id: `exam-${Date.now()}`, name: draft.name.trim(), collectedAt: new Date().toISOString(), result: draft.result.trim(), status: draft.status, report: draft.report.trim() }
-    setExams((current) => [exam, ...current])
-    setDraft({ name: '', result: '', status: 'Pendente', report: '' })
-    onNotify(`${exam.name} registrado no prontuário por ${professional.name}.`)
-  }
+  const [stored] = useState(() => readExams(storageKey))
+  const [examples] = useState(buildDemonstrationExams)
+  const [opened, setOpened] = useState<{ exam: ExamRecord; view: 'resultado' | 'imagens' } | null>(null)
+  const headingRef = useRef<HTMLDivElement>(null)
+  const firstRender = useRef(true)
+  useEffect(() => {
+    if (firstRender.current) firstRender.current = false
+    else headingRef.current?.focus()
+  }, [opened])
+  const exams = [...examples, ...stored.exams]
 
   return (
-    <>
-      <section className="record-section">
-        <div className="record-section-head">
-          <div><div className="record-section-title">Resultados e laudos</div><p>Clique em um exame para ver o resultado e o laudo</p></div>
-        </div>
-        <div className="exam-list">
-          {exams.map((exam) => (
-            <details className="exam-item" key={exam.id}>
-              <summary>
-                <div><strong>{exam.name}</strong><span>{formatLocalDateTime(new Date(exam.collectedAt))}</span></div>
-                <span className={`exam-status ${exam.status.toLowerCase()}`}>{exam.status}</span>
-              </summary>
-              <div className="exam-detail">
-                <div><span>Resultado</span><strong>{exam.result}</strong></div>
-                <div><span>Laudo</span><p>{exam.report || 'Laudo ainda não liberado.'}</p></div>
+    <section className="record-section">
+      {opened ? (
+        <>
+          <div className="record-section-head">
+            <div>
+              <div className="record-section-title" ref={headingRef} tabIndex={-1}>{opened.view === 'imagens' ? 'Imagens do exame' : 'Resultado e laudo'} · {opened.exam.name}</div>
+              <p>{formatLocalDateTime(new Date(opened.exam.collectedAt))} · Responsável: {opened.exam.responsible || 'Não informado'}</p>
+            </div>
+            <Button className="secondary-button" onClick={() => setOpened(null)}>Voltar para exames</Button>
+          </div>
+          {(opened.exam.demonstration || opened.exam.id.startsWith('seed-')) && <p className="exam-demo-notice">Exemplo fictício para demonstração. Não utilizar na assistência ou para diagnóstico.</p>}
+          {opened.view === 'imagens' ? (
+            <div className="exam-images">
+              <p>Ilustrações esquemáticas fictícias — não são imagens de um exame real.</p>
+              <div className="exam-image-grid">
+                {[1, 2].map((image) => (
+                  <figure key={image}>
+                    <svg viewBox="0 0 280 200" role="img" aria-label={`Ilustração esquemática fictícia ${image}`}>
+                      <rect width="280" height="200" rx="8" fill="#19222b" />
+                      <ellipse cx="140" cy="100" rx={image === 1 ? 105 : 96} ry="82" fill="#9ba5ab" />
+                      <ellipse cx="140" cy="100" rx="88" ry="66" fill="#626f76" />
+                      <ellipse cx="107" cy="91" rx="28" ry="43" fill="#28343d" />
+                      <ellipse cx="173" cy="91" rx="28" ry="43" fill="#28343d" />
+                      <circle cx="140" cy="142" r="13" fill="#b9c1c3" />
+                    </svg>
+                    <figcaption>Ilustração {image} · apenas demonstração</figcaption>
+                  </figure>
+                ))}
               </div>
-            </details>
-          ))}
-          {!exams.length && <div className="prescription-draft-empty">Nenhum exame registrado.</div>}
-        </div>
-      </section>
-
-      <section className="record-section exam-form">
+            </div>
+          ) : (
+            <div className="exam-result">
+              <div><span>Resultado</span><p>{opened.exam.result}</p></div>
+              {opened.exam.parameters && <div className="exam-parameters-wrap">
+                <table className="exam-parameters">
+                  <thead><tr><th>Parâmetro</th><th>Resultado</th><th>Referência ilustrativa</th><th>Situação</th></tr></thead>
+                  <tbody>{opened.exam.parameters.map((parameter) => <tr key={parameter.name}>
+                    <td>{parameter.name}</td><td>{parameter.value}</td><td>{parameter.reference}</td><td>{parameter.status}</td>
+                  </tr>)}</tbody>
+                </table>
+              </div>}
+              <div><span>Laudo</span><p>{opened.exam.report || 'Nenhum laudo registrado.'}</p></div>
+              <div><span>Situação do resultado</span><p>{opened.exam.status}</p></div>
+              {opened.exam.kind === 'imagem' && <Button className="secondary-button" onClick={() => setOpened({ exam: opened.exam, view: 'imagens' })}>Ver imagens</Button>}
+            </div>
+          )}
+        </>
+      ) : (
+        <>
         <div className="record-section-head">
-          <div><div className="record-section-title">Registrar exame</div><p>Disponível para todos os perfis · registrado por {professional.name}</p></div>
+          <div><div className="record-section-title" ref={headingRef} tabIndex={-1}>Resultados e laudos</div><p>Consulte o resultado pelo ícone. Para exames de imagem, abra as imagens pelo botão ou com duplo clique na linha.</p></div>
         </div>
-        <div className="exam-form-grid">
-          <label><span>Exame</span><input value={draft.name} onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))} /></label>
-          <label><span>Resultado</span><input value={draft.result} onChange={(event) => setDraft((current) => ({ ...current, result: event.target.value }))} /></label>
-          <label><span>Status</span><select value={draft.status} onChange={(event) => setDraft((current) => ({ ...current, status: event.target.value as ExamStatus }))}><option>Normal</option><option>Alterado</option><option>Pendente</option></select></label>
-          <label className="exam-report-field"><span>Laudo</span><textarea value={draft.report} onChange={(event) => setDraft((current) => ({ ...current, report: event.target.value }))} /></label>
+        {stored.error && <p className="exam-load-error" role="alert">{stored.error}</p>}
+        <div className="exam-table-wrap">
+          <table className="exam-table">
+            <thead><tr><th scope="col">Nº</th><th scope="col">Descrição</th><th scope="col">Data</th><th scope="col">Status</th><th scope="col">Responsável</th><th scope="col">Laudo</th><th scope="col">Consulta</th></tr></thead>
+            <tbody>{exams.map((exam, index) => <tr key={`${exam.id}-${index}`} onDoubleClick={exam.kind === 'imagem' ? () => setOpened({ exam, view: 'imagens' }) : undefined}>
+              <td data-label="Nº">{index + 1}</td>
+              <td data-label="Descrição"><strong>{exam.name}</strong>{exam.demonstration ? <small className="exam-demo-label">Exemplo fictício</small> : exam.id.startsWith('seed-') && <small className="exam-demo-label">Exemplo fictício · registro anterior</small>}</td>
+              <td data-label="Data">{formatLocalDateTime(new Date(exam.collectedAt))}</td>
+              <td data-label="Status">{exam.executionStatus || 'Não informado'}</td>
+              <td data-label="Responsável">{exam.responsible || 'Não informado'}</td>
+              <td data-label="Laudo">{exam.reportStatus || 'Não informado'}</td>
+              <td data-label="Consulta"><div className="exam-actions">
+                <button type="button" className="exam-action" aria-label={`Abrir resultado e laudo de ${exam.name}`} title="Abrir resultado e laudo" onClick={() => setOpened({ exam, view: 'resultado' })} onDoubleClick={(event) => event.stopPropagation()}><Icon name="document" size={18} /></button>
+                {exam.kind === 'imagem' && <button type="button" className="exam-image-action" onClick={() => setOpened({ exam, view: 'imagens' })} onDoubleClick={(event) => event.stopPropagation()}>Ver imagens</button>}
+              </div></td>
+            </tr>)}</tbody>
+          </table>
         </div>
-        <div className="clinical-note-actions"><Button className="primary-button" onClick={addExam}><Icon name="check" size={15} /> Registrar exame</Button></div>
-      </section>
-    </>
+        </>
+      )}
+    </section>
   )
 }
 
@@ -1209,11 +1336,7 @@ function PatientRecord({ patient, role, onBack, onNotify, risks, outcome, isDece
         {activeRecordTab === 'prescription' ? (
           <PatientPrescriptionTab
             patient={patient}
-            role={role}
-            onRoleChange={onRoleChange}
             onNotify={onNotify}
-            risks={risks}
-            medications={medications}
             prescriptionItems={prescriptionItems}
             prescriptionStatus={prescriptionStatus}
             schedule={schedule}
@@ -1229,7 +1352,7 @@ function PatientRecord({ patient, role, onBack, onNotify, risks, outcome, isDece
             onValidateAnamnesis={validateNursingAnamnesis}
           />
         ) : activeRecordTab === 'exams' ? (
-          <ExamsSection patient={patient} role={role} onNotify={onNotify} />
+          <ExamsSection key={patient.admission} patient={patient} />
         ) : activeRecordTab === 'balance' ? (
           <FluidBalanceScreen key={patient.admission} patient={patient} role={role} onNotify={onNotify} />
         ) : activeRecordTab === 'devices' ? (
@@ -1238,10 +1361,6 @@ function PatientRecord({ patient, role, onBack, onNotify, risks, outcome, isDece
           <>
         <div className="record-quick-actions" role="toolbar" aria-label="Ações rápidas do prontuário">
           <Button className="primary-button" onClick={() => document.getElementById('nova-afericao')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><Icon name="admission" size={15} /> Registrar sinais vitais</Button>
-          <Button onClick={() => setActiveRecordTab('prescription')}><Icon name="document" size={15} /> Prescrição</Button>
-          <Button onClick={() => setActiveRecordTab('balance')}><Icon name="clock" size={15} /> Balanço hídrico</Button>
-          <Button onClick={() => setActiveRecordTab('devices')}><Icon name="shield" size={15} /> Dispositivos</Button>
-          <Button onClick={() => setActiveRecordTab('notes')}><Icon name="document" size={15} /> Evoluções</Button>
         </div>
 
         <section className="record-section">
@@ -1313,7 +1432,7 @@ function PatientRecord({ patient, role, onBack, onNotify, risks, outcome, isDece
               {batchError && <div className="batch-validation"><Icon name="alert" size={14} />Preencha todos os campos com valores numéricos válidos. PA deve usar o formato sistólica/diastólica.</div>}
               <div className="batch-footer"><span>Executor: <strong>{professional.name} · {professional.registry}</strong></span><Button className="primary-button" onClick={saveBatch}><Icon name="check" size={15} /> Confirmar e salvar lote</Button></div>
             </div>}
-            <div className="hourly-table">
+            <div className="hourly-table" role="region" aria-label="Tabela de controle horário de sinais vitais" tabIndex={0}>
               <div className="hourly-row table-head">
                 <span>HORÁRIO</span><span>FC</span><span>PA</span><span>FR</span><span>SpO₂</span><span>T°C</span><span>HGT</span><span>EXECUTOR</span>
               </div>
@@ -1433,6 +1552,139 @@ type BalanceEntry = {
   description: string
 }
 
+type BalanceGridCell = {
+  amount: number | null
+  projected: boolean
+  updatedAt: string
+  executor: string
+  parts?: { realized: number; projected: number }
+}
+
+type BalanceGridPeriod = {
+  pumps: string[]
+  outputs?: string[]
+  mergedCells?: string[]
+  cells: Record<string, BalanceGridCell>
+}
+
+type BalanceGridStore = Record<string, BalanceGridPeriod>
+
+type BalanceGridRow = {
+  id: string
+  label: string
+  direction: 'entrada' | 'saida'
+}
+
+const balanceInputRows: BalanceGridRow[] = [
+  { id: 'oral', label: 'Oral (VO)', direction: 'entrada' },
+  { id: 'enteral', label: 'Dieta enteral', direction: 'entrada' },
+  { id: 'parenteral', label: 'Dieta parenteral', direction: 'entrada' },
+  { id: 'evBolus', label: 'EV (bolus)', direction: 'entrada' },
+  { id: 'saline', label: 'Soro', direction: 'entrada' },
+  { id: 'blood', label: 'Hemocomponentes', direction: 'entrada' },
+]
+
+const balancePumpRows: BalanceGridRow[] = [
+  { id: 'pump-example', label: 'Noradrenalina (exemplo)', direction: 'entrada' },
+]
+
+const balanceOutputRows: BalanceGridRow[] = [
+  { id: 'urine', label: 'Urina', direction: 'saida' },
+  { id: 'feces', label: 'Fezes', direction: 'saida' },
+  { id: 'drains', label: 'Drenos', direction: 'saida' },
+  { id: 'other', label: 'Outras saídas', direction: 'saida' },
+]
+
+function balanceCellKey(rowId: string, hour: string) {
+  return JSON.stringify([rowId, hour])
+}
+
+function balanceNameKey(name: string) {
+  return name.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR')
+}
+
+function isEmesisName(name: string) {
+  return ['emese', 'vomito'].includes(balanceNameKey(name))
+}
+
+function balancePeriodKey(date: Date) {
+  const start = new Date(date)
+  start.setHours(7, 0, 0, 0)
+  if (date.getTime() < start.getTime()) start.setDate(start.getDate() - 1)
+  return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`
+}
+
+function legacyBalancePeriod(entry: BalanceEntry) {
+  const date = new Date(entry.id)
+  return Number.isFinite(date.getTime()) && date.getFullYear() >= 2000 ? balancePeriodKey(date) : null
+}
+
+function roundedBalanceVolume(value: number) {
+  return Number(value.toFixed(3))
+}
+
+function BalanceVolumeInput({ label, hour, periodKey, value, projected, canConfirm, disabled, onSave, onConfirm, onInvalid, onStart, onFinish, onNotify }: {
+  label: string
+  hour: string
+  periodKey: string
+  value: number | null
+  projected: boolean
+  canConfirm: boolean
+  disabled: boolean
+  onSave: (value: number | null) => boolean
+  onConfirm: () => void
+  onInvalid: (invalid: boolean) => void
+  onStart: () => void
+  onFinish: (saved: boolean) => void
+  onNotify: (message: string) => void
+}) {
+  const formatted = value === null ? '' : String(value).replace('.', ',')
+  const [draft, setDraft] = useState(formatted)
+  const [error, setError] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editingPeriod, setEditingPeriod] = useState(periodKey)
+
+  useEffect(() => { if (!editing && !error) setDraft(formatted) }, [formatted, editing, error])
+
+  const save = () => {
+    if (editingPeriod !== periodKey && draft !== formatted) {
+      setError(true)
+      onInvalid(true)
+      onNotify('O período do balanço mudou durante a edição. Confira o horário e registre o valor novamente.')
+      return false
+    }
+    if (draft === formatted) { setError(false); onInvalid(false); return true }
+    const text = draft.trim()
+    if (text && !/^\d+(?:[.,]\d{1,3})?$/.test(text)) {
+      setError(true)
+      onInvalid(true)
+      onNotify(`Informe um volume em mL com até três casas decimais para ${label} às ${hour}.`)
+      return false
+    }
+    const amount = text ? Number(text.replace(',', '.')) : null
+    if (amount !== null && (!Number.isFinite(amount) || amount > Number.MAX_SAFE_INTEGER / 1000)) {
+      setError(true)
+      onInvalid(true)
+      onNotify(`Informe um volume válido em mL para ${label} às ${hour}.`)
+      return false
+    }
+    const saved = onSave(amount)
+    setError(!saved)
+    onInvalid(!saved)
+    return saved
+  }
+
+  return (
+    <div className={`balance-volume-cell ${projected ? 'is-projected' : ''}`}>
+      <input aria-label={`${label} às ${hour} em mL${projected && value !== null ? ', previsto' : ''}`} aria-invalid={error} inputMode="decimal" value={draft} placeholder="—" disabled={disabled}
+        onChange={(event) => setDraft(event.target.value)} onFocus={() => { setEditing(true); setEditingPeriod(periodKey); onStart() }} onBlur={() => { const saved = save(); setEditing(false); onFinish(saved) }}
+        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} />
+      {projected && value !== null && <span className="balance-projection-label" aria-hidden="true">P</span>}
+      {canConfirm && <button type="button" className="balance-confirm-cell" disabled={disabled} onClick={onConfirm} aria-label={`Confirmar ${label} às ${hour} como realizado`}>Confirmar</button>}
+    </div>
+  )
+}
+
 const balanceRows: BalanceRow[] = Array.from({ length: 24 }, (_, index) => {
   const hour = (7 + index) % 24
   return {
@@ -1476,123 +1728,252 @@ function BalanceTrendChart({ values }: { values: number[] }) {
   )
 }
 
+function loadBalanceGrid(key: string): { store: BalanceGridStore; error: string } {
+  try {
+    const saved = localStorage.getItem(key)
+    if (!saved) return { store: {}, error: '' }
+    const parsed: unknown = JSON.parse(saved)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Dados inválidos')
+    for (const period of Object.values(parsed)) {
+      if (!period || typeof period !== 'object' || Array.isArray(period)) throw new Error('Período inválido')
+      const data = period as { pumps?: unknown; outputs?: unknown; mergedCells?: unknown; cells?: unknown }
+      if (!Array.isArray(data.pumps) || !data.pumps.every((name) => typeof name === 'string') || (data.outputs !== undefined && (!Array.isArray(data.outputs) || !data.outputs.every((name) => typeof name === 'string'))) || (data.mergedCells !== undefined && (!Array.isArray(data.mergedCells) || !data.mergedCells.every((key) => typeof key === 'string'))) || !data.cells || typeof data.cells !== 'object' || Array.isArray(data.cells)) throw new Error('Registro inválido')
+      for (const cell of Object.values(data.cells)) {
+        if (!cell || typeof cell !== 'object' || Array.isArray(cell)) throw new Error('Célula inválida')
+        const value = cell as Partial<BalanceGridCell>
+        if ((value.amount !== null && (typeof value.amount !== 'number' || !Number.isFinite(value.amount) || value.amount < 0)) || typeof value.projected !== 'boolean' || typeof value.updatedAt !== 'string' || typeof value.executor !== 'string') throw new Error('Valor inválido')
+        if (value.parts !== undefined && (!value.parts || typeof value.parts !== 'object' || typeof value.parts.realized !== 'number' || !Number.isFinite(value.parts.realized) || value.parts.realized < 0 || typeof value.parts.projected !== 'number' || !Number.isFinite(value.parts.projected) || value.parts.projected < 0 || value.projected || value.amount !== roundedBalanceVolume(value.parts.realized + value.parts.projected))) throw new Error('Parcelas inválidas')
+      }
+    }
+    return { store: parsed as BalanceGridStore, error: '' }
+  } catch {
+    return { store: {}, error: 'Não foi possível carregar os registros da grade. A edição está bloqueada para evitar perda de dados.' }
+  }
+}
+
+function loadBalanceEntries(key: string): { entries: BalanceEntry[]; error: string } {
+  try {
+    const saved = localStorage.getItem(key)
+    if (!saved) return { entries: [], error: '' }
+    const parsed: unknown = JSON.parse(saved)
+    if (!Array.isArray(parsed) || !parsed.every((entry) =>
+      entry && typeof entry === 'object' && typeof entry.id === 'number' && typeof entry.hour === 'string' &&
+      (entry.direction === 'entrada' || entry.direction === 'saida') && typeof entry.category === 'string' &&
+      typeof entry.amount === 'number' && Number.isFinite(entry.amount) && entry.amount >= 0 && typeof entry.description === 'string')) throw new Error('Lançamentos inválidos')
+    return { entries: parsed as BalanceEntry[], error: '' }
+  } catch {
+    return { entries: [], error: 'Não foi possível carregar os lançamentos anteriores. A edição e a homologação estão bloqueadas para evitar perda de dados.' }
+  }
+}
+
 function FluidBalanceScreen({ patient, role, onNotify }: { patient: Patient; role: ProfessionalRole; onNotify: (message: string) => void }) {
   const balanceAdmission = patient.admission
   const balanceEntriesKey = `avicen-fluid-balance-entries-${balanceAdmission}`
   const pumpRateKey = `avicen-fluid-balance-pump-rate-${balanceAdmission}`
-  const [entries, setEntries] = useState<BalanceEntry[]>(() => {
-    try { return JSON.parse(localStorage.getItem(balanceEntriesKey) || '[]') as BalanceEntry[] } catch { return [] }
-  })
-  const [direction, setDirection] = useState<'entrada' | 'saida'>('entrada')
-  const [category, setCategory] = useState('Solução intravenosa')
-  const [amount, setAmount] = useState('')
-  const [description, setDescription] = useState('')
-  const [hour, setHour] = useState('09:00')
-  const [error, setError] = useState('')
-  const [pumpRate, setPumpRate] = useState(() => localStorage.getItem(pumpRateKey) || '12')
-  const [pumpRateDraft, setPumpRateDraft] = useState(() => localStorage.getItem(pumpRateKey) || '12')
-  const [rateHistory, setRateHistory] = useState([{ time: '07:00', rate: 12, professional: 'Enf. Camila Torres' }])
-  const shiftStart = new Date()
-  shiftStart.setHours(7, 0, 0, 0)
-  if (new Date().getTime() < shiftStart.getTime()) shiftStart.setDate(shiftStart.getDate() - 1)
-  const shiftKey = `${shiftStart.getFullYear()}-${String(shiftStart.getMonth() + 1).padStart(2, '0')}-${String(shiftStart.getDate()).padStart(2, '0')}`
+  const gridKey = `avicen-fluid-balance-grid-${balanceAdmission}`
+  const [legacyData] = useState(() => loadBalanceEntries(balanceEntriesKey))
+  const entries = legacyData.entries
+  const [loadedGrid] = useState(() => loadBalanceGrid(gridKey))
+  const [gridStore, setGridStore] = useState<BalanceGridStore>(loadedGrid.store)
+  const [pumpName, setPumpName] = useState('')
+  const [outputName, setOutputName] = useState('')
+  const [addingPump, setAddingPump] = useState(false)
+  const [customPump, setCustomPump] = useState(false)
+  const [renamingPump, setRenamingPump] = useState<string | null>(null)
+  const [addingOutput, setAddingOutput] = useState(false)
+  const [invalidCells, setInvalidCells] = useState<Record<string, boolean>>({})
+  const [lockedPeriod, setLockedPeriod] = useState<string | null>(null)
+  const lockedPeriodRef = useRef<string | null>(null)
+  const [pumpRate] = useState(() => localStorage.getItem(pumpRateKey) || '12')
+  const [, setClockTick] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (!document.activeElement?.closest('.balance-grid-scroll input')) setClockTick((value) => value + 1)
+    }, 30000)
+    return () => clearInterval(timer)
+  }, [])
+  const now = new Date()
+  const shiftKey = lockedPeriod ?? balancePeriodKey(now)
+  const shiftStart = new Date(`${shiftKey}T07:00:00`)
+  const shiftEnd = new Date(shiftStart)
+  shiftEnd.setDate(shiftEnd.getDate() + 1)
+  shiftEnd.setMinutes(-1)
   const approvalKey = `avicen-fluid-balance-approval-${balanceAdmission}-${shiftKey}`
   const [approval, setApproval] = useState<{ approvedAt: string; approvedBy: string; netBalance: number } | null>(() => {
     try { return JSON.parse(localStorage.getItem(approvalKey) || 'null') as { approvedAt: string; approvedBy: string; netBalance: number } | null } catch { return null }
   })
+  useEffect(() => {
+    try { setApproval(JSON.parse(localStorage.getItem(approvalKey) || 'null') as { approvedAt: string; approvedBy: string; netBalance: number } | null) }
+    catch { onNotify('Não foi possível carregar a homologação do balanço.') }
+  }, [approvalKey])
 
-  const adjustedRows = useMemo(() => balanceRows.map((row, index) => {
-    const projected = index > 3
-    const adjusted = projected ? { ...row, iv: 0, diet: 0, pumps: Number(pumpRate), urine: 0, drains: 0, other: 0 } : { ...row }
-    entries.filter((entry) => entry.hour === row.hour).forEach((entry) => {
-      if (entry.category === 'Solução intravenosa') adjusted.iv += entry.amount
-      if (entry.category === 'Dieta enteral') adjusted.diet += entry.amount
-      if (entry.category === 'Bomba de infusão') adjusted.pumps += entry.amount
-      if (entry.category === 'Diurese') adjusted.urine += entry.amount
-      if (entry.category === 'Dreno') adjusted.drains += entry.amount
-      if (entry.category === 'Outras saídas') adjusted.other += entry.amount
-    })
-    return { ...adjusted, projected }
-  }), [entries, pumpRate])
-
-  const totals = useMemo(() => adjustedRows.filter((row) => !row.projected).reduce((result, row) => ({
-    iv: result.iv + row.iv,
-    diet: result.diet + row.diet,
-    pumps: result.pumps + row.pumps,
-    urine: result.urine + row.urine,
-    drains: result.drains + row.drains,
-    other: result.other + row.other,
-  }), { iv: 0, diet: 0, pumps: 0, urine: 0, drains: 0, other: 0 }), [adjustedRows])
-
-  const totalInput = totals.iv + totals.diet + totals.pumps
-  const totalOutput = totals.urine + totals.drains + totals.other
-  const netBalance = totalInput - totalOutput
-  const cumulative = adjustedRows.filter((row) => !row.projected).reduce<number[]>((values, row) => {
-    const hourly = row.iv + row.diet + row.pumps - row.urine - row.drains - row.other
-    values.push((values.at(-1) ?? 0) + hourly)
+  const period = gridStore[shiftKey] ?? { pumps: [], cells: {} }
+  const noradrenalineNames = period.pumps.filter((name) => balanceNameKey(name) === 'noradrenalina')
+  const pumpRows = [...balancePumpRows, ...period.pumps.filter((name) => balanceNameKey(name) !== 'noradrenalina').map((name) => ({ id: `pump:${name}`, label: name, direction: 'entrada' as const }))]
+  const inputRows = [...balanceInputRows, ...pumpRows]
+  const outputNames = period.outputs ?? []
+  const hasSavedEmesis = balanceRows.some((row) => Object.prototype.hasOwnProperty.call(period.cells, balanceCellKey('emesis', row.hour)))
+  const outputRows = [
+    ...balanceOutputRows.slice(0, 3),
+    ...(!outputNames.some(isEmesisName) || hasSavedEmesis ? [{ id: 'emesis', label: 'Êmese', direction: 'saida' as const }] : []),
+    ...balanceOutputRows.slice(3),
+    ...outputNames.map((name) => ({ id: `output:${name}`, label: isEmesisName(name) ? `Êmese (registro anterior: ${name})` : name, direction: 'saida' as const })),
+  ]
+  const medicationOptions = [...new Set([...prescribedMedications.map((item) => item.name), ...homeMedicationCatalog, 'Midazolam', 'Fentanil', ...period.pumps])]
+  const legacyCategories: Record<string, string> = {
+    iv: 'Solução intravenosa', diet: 'Dieta enteral', pumps: 'Bomba de infusão',
+    urine: 'Diurese', drains: 'Dreno', other: 'Outras saídas',
+  }
+  const hourIsFuture = (index: number) => {
+    const start = new Date(shiftStart)
+    start.setHours(start.getHours() + index)
+    return start.getTime() > Date.now()
+  }
+  const getRawCell = (rowId: string, index: number): { realized: number | null; projected: number | null } => {
+    const row = balanceRows[index]
+    const saved = period.cells[balanceCellKey(rowId, row.hour)]
+    if (saved) {
+      if (saved.parts) return saved.parts
+      return saved.projected ? { realized: null, projected: saved.amount } : { realized: saved.amount, projected: null }
+    }
+    const exampleValues: Record<string, number> = { iv: row.iv, diet: row.diet, pumps: row.pumps, urine: row.urine, drains: row.drains, other: row.other }
+    const example = index < 4 ? exampleValues[rowId] ?? 0 : rowId === 'pumps' ? Number(pumpRate) : 0
+    const legacy = entries.filter((entry) => legacyBalancePeriod(entry) === shiftKey && entry.hour === row.hour && entry.category === legacyCategories[rowId]).reduce((sum, entry) => sum + entry.amount, 0)
+    const amount = example + legacy
+    return index >= 4 || hourIsFuture(index) ? { realized: null, projected: amount || null } : { realized: amount || null, projected: null }
+  }
+  const mergedSources: Record<string, string[]> = {
+    enteral: ['diet'],
+    saline: ['iv'],
+    'pump-example': ['pumps', ...noradrenalineNames.map((name) => `pump:${name}`)],
+  }
+  const getCell = (rowId: string, index: number) => {
+    const key = balanceCellKey(rowId, balanceRows[index].hour)
+    const sources = period.mergedCells?.includes(key) ? [rowId] : [rowId, ...(mergedSources[rowId] ?? [])]
+    const parts = sources.map((source) => getRawCell(source, index))
+    const combine = (kind: 'realized' | 'projected') => {
+      const values = parts.map((part) => part[kind]).filter((value): value is number => value !== null)
+      return values.length ? roundedBalanceVolume(values.reduce((sum, value) => sum + value, 0)) : null
+    }
+    const realized = combine('realized')
+    const projectedAmount = combine('projected')
+    const amount = realized === null && projectedAmount === null ? null : roundedBalanceVolume((realized ?? 0) + (projectedAmount ?? 0))
+    return { amount, realized, projectedAmount, projected: realized === null && projectedAmount !== null }
+  }
+  const sumCell = (rowId: string, index: number, includeProjected: boolean) => {
+    const cell = getCell(rowId, index)
+    return (cell.realized ?? 0) + (includeProjected ? cell.projectedAmount ?? 0 : 0)
+  }
+  const sumRows = (rows: BalanceGridRow[], index: number, includeProjected: boolean) => rows.reduce((sum, row) => sum + sumCell(row.id, index, includeProjected), 0)
+  const totalForRows = (rows: BalanceGridRow[], includeProjected = false) => roundedBalanceVolume(balanceRows.reduce((sum, _, index) => sum + sumRows(rows, index, includeProjected), 0))
+  const adjustedRows = balanceRows.map((row, index) => ({
+    hour: row.hour, input: sumRows(inputRows, index, false), output: sumRows(outputRows, index, false),
+  }))
+  const totalInput = totalForRows(inputRows)
+  const totalOutput = totalForRows(outputRows)
+  const netBalance = roundedBalanceVolume(totalInput - totalOutput)
+  const predictedInput = totalForRows(inputRows, true)
+  const predictedOutput = totalForRows(outputRows, true)
+  const predictedNet = roundedBalanceVolume(predictedInput - predictedOutput)
+  const cumulative = adjustedRows.reduce<number[]>((values, row) => {
+    const hourly = row.input - row.output
+    values.push(roundedBalanceVolume((values.at(-1) ?? 0) + hourly))
     return values
   }, [])
 
-  const categories = direction === 'entrada'
-    ? ['Solução intravenosa', 'Dieta enteral', 'Bomba de infusão']
-    : ['Diurese', 'Dreno', 'Outras saídas']
-
-  const changeDirection = (nextDirection: 'entrada' | 'saida') => {
-    setDirection(nextDirection)
-    setCategory(nextDirection === 'entrada' ? 'Solução intravenosa' : 'Diurese')
-    setError('')
+  const savePeriod = (updated: BalanceGridPeriod) => {
+    if (loadedGrid.error || legacyData.error) {
+      onNotify(loadedGrid.error || legacyData.error)
+      return false
+    }
+    const next = { ...gridStore, [shiftKey]: updated }
+    try {
+      localStorage.removeItem(approvalKey)
+      setApproval(null)
+      localStorage.setItem(gridKey, JSON.stringify(next))
+    } catch {
+      onNotify('Não foi possível salvar o balanço hídrico neste navegador.')
+      return false
+    }
+    setGridStore(next)
+    return true
   }
 
-  const addEntry = () => {
-    const numericAmount = Number(amount.replace(',', '.'))
-    if (!numericAmount || numericAmount <= 0) {
-      setError('Informe um volume maior que zero.')
-      return
+  const saveCellParts = (rowId: string, index: number, realized: number | null, projected: number | null) => {
+    const key = balanceCellKey(rowId, balanceRows[index].hour)
+    const amount = realized === null && projected === null ? null : roundedBalanceVolume((realized ?? 0) + (projected ?? 0))
+    const cell: BalanceGridCell = {
+      amount, projected: realized === null && projected !== null, updatedAt: new Date().toISOString(), executor: `${professionals[role].name} · ${professionals[role].registry}`,
+      ...(realized !== null && projected !== null ? { parts: { realized, projected } } : {}),
     }
-    if (!description.trim()) {
-      setError('Descreva a solução, dieta, dispositivo ou ocorrência.')
-      return
-    }
-    const newEntry = {
-      id: Date.now(), hour, direction, category, amount: numericAmount, description: description.trim(),
-    }
-    setEntries((current) => {
-      const updated = [...current, newEntry]
-      localStorage.setItem(balanceEntriesKey, JSON.stringify(updated))
-      return updated
+    return savePeriod({
+      ...period,
+      ...(mergedSources[rowId] ? { mergedCells: [...new Set([...(period.mergedCells ?? []), key])] } : {}),
+      cells: { ...period.cells, [key]: cell },
     })
-    setApproval(null)
-    localStorage.removeItem(approvalKey)
-    setAmount('')
-    setDescription('')
-    setError('')
-    onNotify(`${direction === 'entrada' ? 'Entrada' : 'Saída'} de ${numericAmount} mL registrada às ${hour}.`)
   }
+  const saveCell = (rowId: string, index: number, amount: number | null, projected = hourIsFuture(index)) =>
+    saveCellParts(rowId, index, projected ? null : amount, projected ? amount : null)
 
-  const partialBalance = (hours: number) => adjustedRows.slice(0, hours).filter((row) => !row.projected)
-    .reduce((total, row) => total + row.iv + row.diet + row.pumps - row.urine - row.drains - row.other, 0)
-
-  const updatePumpRate = () => {
-    if (role !== 'enfermeiro') {
-      onNotify('Somente o perfil enfermeiro pode ajustar a vazão de bomba.')
+  const addPump = (rawName: string) => {
+    const name = rawName.trim()
+    if (!name) { onNotify('Informe ou selecione o nome do medicamento.'); return }
+    if (name === '__outro__') { onNotify('Informe um nome válido para o medicamento.'); return }
+    if (balanceNameKey(name) === 'noradrenalina' || period.pumps.some((item) => balanceNameKey(item) === balanceNameKey(name))) {
+      onNotify('Este medicamento já possui uma linha na tabela.')
       return
     }
-    const numericRate = Number(pumpRateDraft.replace(',', '.'))
-    if (!(numericRate > 0)) {
-      onNotify('Informe uma vazão de bomba válida.')
+    if (savePeriod({ ...period, pumps: [...period.pumps, name] })) {
+      setPumpName('')
+      setAddingPump(false)
+      setCustomPump(false)
+    }
+  }
+
+  const pumpHasRecords = (name: string) => balanceRows.some((row) => {
+    const key = balanceCellKey(`pump:${name}`, row.hour)
+    return Object.prototype.hasOwnProperty.call(period.cells, key) || invalidCells[`${shiftKey}:${key}`]
+  })
+
+  const renamePump = (original: string, rawName: string) => {
+    const name = rawName.trim()
+    if (!name) { onNotify('Informe ou selecione o nome do medicamento.'); return }
+    if (name === '__outro__') { onNotify('Informe um nome válido para o medicamento.'); return }
+    if (pumpHasRecords(original)) { onNotify('Não é possível trocar o medicamento de uma linha com lançamentos.'); return }
+    if (balanceNameKey(name) === 'noradrenalina' || period.pumps.some((item) => item !== original && balanceNameKey(item) === balanceNameKey(name))) {
+      onNotify('Este medicamento já possui uma linha na tabela.')
       return
     }
-    setPumpRate(String(numericRate))
-    localStorage.setItem(pumpRateKey, String(numericRate))
-    setApproval(null)
-    localStorage.removeItem(approvalKey)
-    setRateHistory((current) => [...current, { time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), rate: numericRate, professional: professionals.enfermeiro.name }])
-    onNotify(`Vazão ajustada para ${numericRate} mL/h. Projeções futuras recalculadas.`)
+    if (name === original || savePeriod({ ...period, pumps: period.pumps.map((item) => item === original ? name : item) })) {
+      setRenamingPump(null)
+      setPumpName('')
+    }
   }
+
+  const addOutput = () => {
+    const name = outputName.trim()
+    if (!name) { onNotify('Informe ou selecione o nome da saída.'); return }
+    if ((isEmesisName(name) && outputRows.some((row) => row.id === 'emesis' || (row.id.startsWith('output:') && isEmesisName(row.id.slice(7))))) ||
+      outputRows.some((row) => balanceNameKey(row.label) === balanceNameKey(name))) {
+      onNotify('Esta saída já possui uma linha na tabela.')
+      return
+    }
+    if (savePeriod({ ...period, outputs: [...outputNames, name] })) {
+      setOutputName('')
+      setAddingOutput(false)
+    }
+  }
+
+  const partialBalance = (hours: number) => roundedBalanceVolume(adjustedRows.slice(0, hours)
+    .reduce((total, row) => total + row.input - row.output, 0))
 
   const approveBalance = () => {
     if (role !== 'enfermeiro') {
       onNotify('A homologação do balanço hídrico é exclusiva do perfil enfermeiro.')
+      return
+    }
+    if (loadedGrid.error || legacyData.error || Object.keys(invalidCells).some((key) => key.startsWith(`${shiftKey}:`) && invalidCells[key])) {
+      onNotify('Corrija os valores não salvos da grade antes de homologar o balanço.')
       return
     }
     const record = {
@@ -1600,10 +1981,73 @@ function FluidBalanceScreen({ patient, role, onNotify }: { patient: Patient; rol
       approvedBy: `${professionals[role].name} · ${professionals[role].registry}`,
       netBalance,
     }
-    localStorage.setItem(approvalKey, JSON.stringify(record))
+    try { localStorage.setItem(approvalKey, JSON.stringify(record)) }
+    catch { onNotify('Não foi possível salvar a homologação neste navegador.'); return }
     setApproval(record)
     onNotify(`Balanço hídrico homologado por ${professionals[role].name}.`)
   }
+
+  const renderBalanceRow = (row: BalanceGridRow) => (
+    <tr key={row.id}>
+      <th scope="row">
+        {row.id.startsWith('pump:') ? (
+          <div className="balance-grid-row-control">
+            <select aria-label={`Medicamento BIC: ${row.label}`} value={row.label} disabled={pumpHasRecords(row.label) || !!(loadedGrid.error || legacyData.error)}
+              title={pumpHasRecords(row.label) ? `${row.label} — não pode ser alterado após um lançamento.` : `${row.label} — selecionar medicamento`}
+              onChange={(event) => {
+                if (event.target.value === '__outro__') { setPumpName(''); setRenamingPump(row.label) }
+                else renamePump(row.label, event.target.value)
+              }}>
+              {medicationOptions.map((name) => <option value={name} key={name}>{name}</option>)}
+              <option value="__outro__">Outro medicamento…</option>
+            </select>
+            {renamingPump === row.label && <><input aria-label={`Outro medicamento para ${row.label}`} value={pumpName} onChange={(event) => setPumpName(event.target.value)} />
+              <Button className="secondary-button" onClick={() => renamePump(row.label, pumpName)}>Confirmar</Button></>}
+          </div>
+        ) : row.label}
+      </th>
+          {balanceRows.map((hourRow, index) => {
+            const cell = getCell(row.id, index)
+            const cellLabel = row.id.startsWith('output:') ? `${row.label} (saída)` : row.label
+            const mixed = cell.realized !== null && cell.projectedAmount !== null
+            const renderVolume = (part?: 'realized' | 'projected') => <BalanceVolumeInput
+              label={`${cellLabel}${part === 'realized' ? ' (realizado)' : part === 'projected' ? ' (previsto)' : ''}`} hour={hourRow.hour} periodKey={shiftKey}
+              value={part === 'realized' ? cell.realized : part === 'projected' ? cell.projectedAmount : cell.amount}
+              projected={part === 'projected' || (!part && cell.projected)}
+              canConfirm={(part === 'projected' || (!part && cell.projected)) && cell.projectedAmount !== null && !hourIsFuture(index)} disabled={!!(loadedGrid.error || legacyData.error)}
+              onSave={(amount) => {
+                const other = part === 'realized' ? 'projected' : 'realized'
+                if (part && invalidCells[`${shiftKey}:${balanceCellKey(row.id, hourRow.hour)}:${other}`]) {
+                  onNotify('Corrija a outra parcela deste horário antes de salvar.')
+                  return false
+                }
+                return part === 'realized' ? saveCellParts(row.id, index, amount, cell.projectedAmount) : part === 'projected' ? saveCellParts(row.id, index, cell.realized, amount) : saveCell(row.id, index, amount)
+              }}
+              onConfirm={() => {
+                const key = `${shiftKey}:${balanceCellKey(row.id, hourRow.hour)}`
+                if (invalidCells[key] || invalidCells[`${key}:realized`] || invalidCells[`${key}:projected`]) { onNotify('Corrija os valores não salvos antes de confirmar.'); return }
+                if (saveCell(row.id, index, cell.amount, false)) onNotify(`${row.label} às ${hourRow.hour} confirmado como realizado.`)
+              }}
+              onInvalid={(invalid) => setInvalidCells((current) => ({ ...current, [`${shiftKey}:${balanceCellKey(row.id, hourRow.hour)}${part ? `:${part}` : ''}`]: invalid }))}
+              onStart={() => {
+                const selected = lockedPeriodRef.current ?? balancePeriodKey(new Date())
+                lockedPeriodRef.current = selected
+                setLockedPeriod(selected)
+              }}
+              onFinish={(saved) => {
+                if (saved || shiftKey === balancePeriodKey(new Date())) {
+                  lockedPeriodRef.current = null
+                  setLockedPeriod(null)
+                }
+                else onNotify('Corrija o valor para concluir o período anterior.')
+              }}
+              onNotify={onNotify} />
+            return <td key={hourRow.hour}>{mixed
+              ? <div className="balance-cell-parts"><div><span>R</span>{renderVolume('realized')}</div><div>{renderVolume('projected')}</div></div>
+              : renderVolume()}</td>
+          })}
+    </tr>
+  )
 
   return (
     <div className="balance-page">
@@ -1613,7 +2057,7 @@ function FluidBalanceScreen({ patient, role, onNotify }: { patient: Patient; rol
             <div className="page-title">Balanço hídrico</div>
             <p>Controle horário de entradas, saídas e saldo acumulado nas últimas 24 horas</p>
           </div>
-          <div className="balance-period"><Icon name="clock" size={17} /><div><span>PERÍODO ATUAL</span><strong>{new Date().toLocaleDateString('pt-BR')} às 07:00 — {new Date(Date.now() + 86400000).toLocaleDateString('pt-BR')} às 06:59 · Agora {new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</strong></div></div>
+          <div className="balance-period"><Icon name="clock" size={17} /><div><span>PERÍODO ATUAL</span><strong>{shiftStart.toLocaleDateString('pt-BR')} às 07:00 — {shiftEnd.toLocaleDateString('pt-BR')} às 06:59 · Agora {now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</strong></div></div>
         </div>
 
         <section className="balance-patient-bar">
@@ -1630,22 +2074,22 @@ function FluidBalanceScreen({ patient, role, onNotify }: { patient: Patient; rol
         <section className="balance-summary">
           <div className="balance-stat input">
             <div className="balance-stat-icon"><Icon name="admission" size={20} /></div>
-            <div><span>TOTAL DE ENTRADAS</span><strong>{totalInput.toLocaleString('pt-BR')} <small>mL</small></strong><em>{patient.weightKg ? `${(totalInput / patient.weightKg).toFixed(1).replace('.', ',')} mL/kg` : 'Peso não informado'}</em></div>
+            <div><span>TOTAL DE ENTRADAS</span><strong>{totalInput.toLocaleString('pt-BR')} <small>mL</small></strong><em>{patient.weightKg ? `${(totalInput / patient.weightKg).toFixed(1).replace('.', ',')} mL/kg` : 'Peso não informado'}</em><small>Realizado acima · Previsto: {predictedInput.toLocaleString('pt-BR')} mL</small></div>
           </div>
           <div className="balance-stat output">
             <div className="balance-stat-icon"><Icon name="handoff" size={20} /></div>
-            <div><span>TOTAL DE SAÍDAS</span><strong>{totalOutput.toLocaleString('pt-BR')} <small>mL</small></strong><em>{patient.weightKg ? `Diurese: ${(totals.urine / patient.weightKg / 24).toFixed(1).replace('.', ',')} mL/kg/h` : 'Peso não informado'}</em></div>
+            <div><span>TOTAL DE SAÍDAS</span><strong>{totalOutput.toLocaleString('pt-BR')} <small>mL</small></strong><em>{patient.weightKg ? `Diurese: ${(totalForRows([balanceOutputRows[0]]) / patient.weightKg / 24).toFixed(1).replace('.', ',')} mL/kg/h` : 'Peso não informado'}</em><small>Realizado acima · Previsto: {predictedOutput.toLocaleString('pt-BR')} mL</small></div>
           </div>
           <div className={`balance-stat net ${netBalance > 500 ? 'warning' : ''}`}>
             <div className="balance-stat-icon"><Icon name="balance" size={20} /></div>
-            <div><span>SALDO ACUMULADO 24H</span><strong>{netBalance > 0 ? '+' : ''}{netBalance.toLocaleString('pt-BR')} <small>mL</small></strong><em>{netBalance > 500 ? 'Acima da meta prescrita' : 'Dentro da meta prescrita'}</em></div>
+            <div><span>SALDO ACUMULADO 24H</span><strong>{netBalance > 0 ? '+' : ''}{netBalance.toLocaleString('pt-BR')} <small>mL</small></strong><em>{netBalance > 500 ? 'Acima da meta prescrita' : 'Dentro da meta prescrita'}</em><small>Realizado acima · Previsto: {predictedNet > 0 ? '+' : ''}{predictedNet.toLocaleString('pt-BR')} mL</small></div>
           </div>
           <div className="balance-goal">
             <span>META PRESCRITA</span><strong>0 a +500 mL / 24h</strong>
             <progress className="goal-track" max="700" value={Math.min(700, Math.max(0, netBalance))} />
             <small>Definida pela equipe médica às 07:18</small>
             {approval
-              ? <small className="balance-homologation-status">Homologado por {approval.approvedBy} · {formatLocalDateTime(new Date(approval.approvedAt))} · saldo {approval.netBalance > 0 ? '+' : ''}{approval.netBalance} mL</small>
+              ? <small className="balance-homologation-status">Homologado por {approval.approvedBy} · {formatLocalDateTime(new Date(approval.approvedAt))} · saldo {approval.netBalance > 0 ? '+' : ''}{approval.netBalance.toLocaleString('pt-BR')} mL</small>
               : <small>{role === 'enfermeiro' ? 'Aguardando homologação do enfermeiro.' : 'Homologação exclusiva do perfil enfermeiro.'}</small>}
             {role === 'enfermeiro' && <Button className="primary-button balance-approval-button" onClick={approveBalance}><Icon name="check" size={15} /> {approval ? 'Re-homologar balanço' : 'Homologar balanço do turno'}</Button>}
           </div>
@@ -1655,39 +2099,54 @@ function FluidBalanceScreen({ patient, role, onNotify }: { patient: Patient; rol
           <section className="balance-main-column">
             <div className="record-section balance-table-card">
               <div className="record-section-head">
-                <div><div className="record-section-title">Registro horário</div><p>Volumes em mililitros (mL) · Lançamentos agrupados por hora</p></div>
-                <div className="balance-legend"><span className="input-dot" /> Realizado <span className="output-dot" /> Saídas <span className="projected-dot" /> Projetado</div>
+                <div><div className="record-section-title">Registro horário</div><p>Dados demonstrativos · mL · Salvo ao sair da célula · R = realizado · P = previsto</p></div>
               </div>
-              <div className="balance-table-wrap">
-                <div className="balance-table grouped-head">
-                  <span>HORÁRIO</span><strong>ENTRADAS</strong><strong>SAÍDAS</strong><span>SALDO / H</span><span>ACUMULADO</span>
-                </div>
-                <div className="balance-table column-head">
-                  <span /><span>EV</span><span>DIETA</span><span>BOMBAS</span><span>URINA</span><span>DRENOS</span><span>OUTROS</span><span /><span />
-                </div>
-                <div className="balance-table-body">
-                  {adjustedRows.map((row, index) => {
-                    const input = row.iv + row.diet + row.pumps
-                    const output = row.urine + row.drains + row.other
-                    const net = input - output
-                    return (
-                      <div className={`balance-table data-row ${row.hour === '10:00' ? 'current' : ''} ${row.projected ? 'projected' : ''}`} key={row.hour}>
-                        <strong>{row.hour}</strong>
-                        <span>{row.projected ? '···' : row.iv || '—'}</span><span>{row.projected ? '···' : row.diet || '—'}</span><span>{row.pumps || '—'}{row.projected ? '*' : ''}</span>
-                        <span>{row.projected ? '···' : row.urine || '—'}</span><span>{row.projected ? '···' : row.drains || '—'}</span><span>{row.projected ? '···' : row.other || '—'}</span>
-                        <b className={row.projected ? 'projected-value' : net < 0 ? 'negative' : 'positive'}>{row.projected ? 'Proj.' : `${net > 0 ? '+' : ''}${net}`}</b>
-                        <b className={row.projected ? 'projected-value' : (cumulative[index] ?? 0) < 0 ? 'negative' : 'positive'}>{row.projected ? '—' : `${(cumulative[index] ?? 0) > 0 ? '+' : ''}${cumulative[index]}`}</b>
-                      </div>
-                    )
-                  })}
-                </div>
-                <div className="balance-table balance-subtotal-row"><strong>Balanço Parcial - 6 Horas</strong><span /><span /><span /><span /><span /><span /><b>{partialBalance(6) > 0 ? '+' : ''}{partialBalance(6)} mL</b><b>Realizado</b></div>
-                <div className="balance-table balance-subtotal-row"><strong>Balanço Parcial - 12 Horas</strong><span /><span /><span /><span /><span /><span /><b>{partialBalance(12) > 0 ? '+' : ''}{partialBalance(12)} mL</b><b>Realizado</b></div>
-                <div className="balance-table total-row">
-                  <strong>Balanço Acumulado - 24 Horas</strong><span>{totals.iv}</span><span>{totals.diet}</span><span>{totals.pumps}</span>
-                  <span>{totals.urine}</span><span>{totals.drains}</span><span>{totals.other}</span>
-                  <b>{netBalance > 0 ? '+' : ''}{netBalance}</b><b>{netBalance > 0 ? '+' : ''}{netBalance}</b>
-                </div>
+              <details className="balance-grid-note">
+                <summary>Orientações da tabela</summary>
+                <p>Dados demonstrativos. O total previsto inclui o realizado e as projeções, que não se tornam realizadas automaticamente. Cada célula representa o total da categoria no horário; quando há valores realizados e previstos no mesmo horário, as parcelas são editadas separadamente. Os volumes aceitam até três casas decimais.</p>
+                <p>A lista de BIC é demonstrativa e não confirma uma prescrição. Nomes ficam bloqueados após lançamentos. Os dados fictícios de BIC estão na linha de noradrenalina.</p>
+              </details>
+              {lockedPeriod && lockedPeriod !== balancePeriodKey(now) && <div className="balance-form-error" role="status">Conclua ou corrija a edição para avançar ao período atual.</div>}
+              {(loadedGrid.error || legacyData.error) && <div className="balance-form-error" role="alert">{loadedGrid.error || legacyData.error}</div>}
+              <div className="balance-grid-scroll" role="region" aria-label="Tabela de entradas e saídas por horário" tabIndex={0}>
+                <table className="balance-hour-grid">
+                  <thead><tr><th scope="col">Item</th>{balanceRows.map((row) => <th scope="col" key={row.hour}>{row.hour}</th>)}</tr></thead>
+                  <tbody>
+                    <tr className="balance-group-row"><th scope="rowgroup">Entradas</th><td colSpan={24} /></tr>
+                    {balanceInputRows.map(renderBalanceRow)}
+                    <tr className="balance-group-row"><th scope="row">BIC <Button className="secondary-button balance-grid-add" onClick={() => { setAddingPump(true); setCustomPump(false); setRenamingPump(null); setPumpName('') }}>+ Medicamento</Button></th><td colSpan={24} /></tr>
+                    {pumpRows.map(renderBalanceRow)}
+                    {addingPump && <tr><th scope="row"><div className="balance-grid-row-control">
+                      <select aria-label="Selecionar medicamento em BIC" value="" onChange={(event) => {
+                        if (event.target.value === '__outro__') { setCustomPump(true); setPumpName('') }
+                        else if (event.target.value) addPump(event.target.value)
+                      }}>
+                        <option value="">Selecione</option>
+                        {medicationOptions.filter((name) => balanceNameKey(name) !== 'noradrenalina' && !period.pumps.some((item) => balanceNameKey(item) === balanceNameKey(name))).map((name) => <option value={name} key={name}>{name}</option>)}
+                        <option value="__outro__">Outro medicamento…</option>
+                      </select>
+                      {customPump && <><input aria-label="Nome do novo medicamento em BIC" value={pumpName} onChange={(event) => setPumpName(event.target.value)} placeholder="Nome" />
+                        <Button className="secondary-button" onClick={() => addPump(pumpName)}>Adicionar</Button></>}
+                      <Button className="secondary-button" onClick={() => { setAddingPump(false); setCustomPump(false); setPumpName('') }}>Cancelar</Button>
+                    </div></th><td colSpan={24} /></tr>}
+                  </tbody>
+                  <tbody>
+                    <tr className="balance-group-row"><th scope="rowgroup">Saídas <Button className="secondary-button balance-grid-add" onClick={() => setAddingOutput(true)}>+ Saída</Button></th><td colSpan={24} /></tr>
+                    {outputRows.map(renderBalanceRow)}
+                    {addingOutput && <tr><th scope="row"><div className="balance-grid-row-control">
+                      <input aria-label="Nome da nova saída" list="balance-output-options" value={outputName} onChange={(event) => setOutputName(event.target.value)} placeholder="Selecione ou digite" />
+                      <datalist id="balance-output-options"><option value="Aspiração gástrica" /><option value="Efluente de estomia" /><option value="Perdas sanguíneas" /></datalist>
+                      <Button className="secondary-button" onClick={addOutput}>Adicionar</Button>
+                      <Button className="secondary-button" onClick={() => { setAddingOutput(false); setOutputName('') }}>Cancelar</Button>
+                    </div></th><td colSpan={24} /></tr>}
+                  </tbody>
+                </table>
+              </div>
+              <div className="balance-grid-totals">
+                <span>Saldo realizado · 6h <strong>{partialBalance(6) > 0 ? '+' : ''}{partialBalance(6).toLocaleString('pt-BR')} mL</strong></span>
+                <span>Saldo realizado · 12h <strong>{partialBalance(12) > 0 ? '+' : ''}{partialBalance(12).toLocaleString('pt-BR')} mL</strong></span>
+                <span>Saldo realizado · 24h <strong>{netBalance > 0 ? '+' : ''}{netBalance.toLocaleString('pt-BR')} mL</strong></span>
+                <span>Saldo previsto · 24h <strong>{predictedNet > 0 ? '+' : ''}{predictedNet.toLocaleString('pt-BR')} mL</strong></span>
               </div>
             </div>
 
@@ -1701,61 +2160,30 @@ function FluidBalanceScreen({ patient, role, onNotify }: { patient: Patient; rol
                 <div className="balance-chart">
                   <div className="goal-zone">Faixa da meta</div>
                   <BalanceTrendChart values={cumulative} />
-                  <div className="balance-x-labels"><span>10h</span><span>14h</span><span>18h</span><span>22h</span><span>02h</span><span>06h</span><span>09h</span></div>
+                  <div className="balance-x-labels"><span>07h</span><span>11h</span><span>15h</span><span>19h</span><span>23h</span><span>03h</span><span>06h</span></div>
                 </div>
               </div>
             </div>
           </section>
 
           <aside className="balance-side-column">
-            <section className="record-section infusion-rate-card">
-              <div className="balance-entry-head"><div className="summary-icon"><Icon name="medication" size={18} /></div><div><div className="record-section-title">Infusão contínua vasoativa</div><p>Noradrenalina · vazão base programada</p></div></div>
-              <label><span>Vazão atual (mL/h)</span><div><input value={pumpRateDraft} disabled={role !== 'enfermeiro'} onChange={(event) => setPumpRateDraft(event.target.value)} inputMode="decimal" />{role === 'enfermeiro' ? <Button onClick={updatePumpRate}>Registrar ajuste</Button> : <span className="immutable-chip">Somente consulta</span>}</div></label>
-              <div className="rate-history">{rateHistory.slice().reverse().map((item, index) => <div key={`${item.time}-${index}`}><strong>{item.rate} mL/h</strong><span>{item.time} · {item.professional}</span></div>)}</div>
-              <small>* A nova vazão é projetada somente nas horas futuras. Valores projetados não compõem o balanço realizado.</small>
-            </section>
-            <section className="record-section balance-entry-card">
-              <div className="balance-entry-head">
-                <div className="summary-icon"><Icon name="admission" size={18} /></div>
-                <div><div className="record-section-title">Novo lançamento</div><p>Registre uma entrada ou saída</p></div>
-              </div>
-              <div className="balance-toggle">
-                <Button className={direction === 'entrada' ? 'active input' : ''} onClick={() => changeDirection('entrada')}>Entrada</Button>
-                <Button className={direction === 'saida' ? 'active output' : ''} onClick={() => changeDirection('saida')}>Saída</Button>
-              </div>
-              <div className="balance-form">
-                <label><span>Horário <b>*</b></span><select value={hour} onChange={(event) => setHour(event.target.value)}>{balanceRows.slice(0, 4).map((row) => <option key={row.hour}>{row.hour}</option>)}</select></label>
-                <label><span>Categoria <b>*</b></span><select value={category} onChange={(event) => setCategory(event.target.value)}>{categories.map((item) => <option key={item}>{item}</option>)}</select></label>
-                <label><span>Volume (mL) <b>*</b></span><input value={amount} onChange={(event) => setAmount(event.target.value)} inputMode="decimal" placeholder="Ex.: 250" /></label>
-                <label><span>Descrição <b>*</b></span><textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder={direction === 'entrada' ? 'Ex.: SF 0,9% em acesso central' : 'Ex.: Diurese por sonda vesical'} /></label>
-                {error && <div className="balance-form-error"><Icon name="alert" size={15} /><span>{error}</span></div>}
-                <div className="balance-executor">
-                  <div className="profile-avatar">{professionals[role].initials}</div>
-                  <div><span>Executor identificado</span><strong>{professionals[role].name}</strong><small>{professionals[role].registry} · agora</small></div>
-                </div>
-                <Button className="primary-button balance-submit" onClick={addEntry}><Icon name="check" size={16} /> Registrar lançamento</Button>
-              </div>
-            </section>
-
             <section className="record-section balance-breakdown">
               <div className="record-section-title">Composição das 24 horas</div>
               <div className="breakdown-group"><strong>Entradas</strong>
-                <div><span>Soluções intravenosas</span><b>{totals.iv} mL</b></div>
-                <div><span>Dieta enteral</span><b>{totals.diet} mL</b></div>
-                <div><span>Bombas de infusão</span><b>{totals.pumps} mL</b></div>
+                {balanceInputRows.map((row) => <div key={row.id}><span>{row.label}</span><b>{totalForRows([row]).toLocaleString('pt-BR')} mL</b></div>)}
+                <div><span>BIC</span><b>{totalForRows(pumpRows).toLocaleString('pt-BR')} mL</b></div>
               </div>
               <div className="breakdown-group output"><strong>Saídas</strong>
-                <div><span>Diurese</span><b>{totals.urine} mL</b></div>
-                <div><span>Drenos</span><b>{totals.drains} mL</b></div>
-                <div><span>Outras perdas</span><b>{totals.other} mL</b></div>
+                {outputRows.map((row) => <div key={row.id}><span>{row.label}</span><b>{totalForRows([row]).toLocaleString('pt-BR')} mL</b></div>)}
               </div>
             </section>
 
             {entries.length > 0 && (
               <section className="record-section latest-entries">
-                <div className="record-section-title">Lançamentos nesta sessão</div>
+                <div className="record-section-title">Lançamentos anteriores preservados</div>
+                <p>As descrições originais foram mantidas. O período é identificado pela data do registro; lançamentos sem data identificável não entram nos totais. Uma correção na grade substitui o total exibido para aquela categoria e horário.</p>
                 {entries.slice().reverse().map((entry) => (
-                  <div key={entry.id}><span className={entry.direction}>{entry.direction === 'entrada' ? '+' : '−'}{entry.amount} mL</span><div><strong>{entry.category}</strong><small>{entry.hour} · {entry.description}</small></div></div>
+                  <div key={entry.id}><span className={entry.direction}>{entry.direction === 'entrada' ? '+' : '−'}{entry.amount} mL</span><div><strong>{entry.category}</strong><small>{legacyBalancePeriod(entry) ? formatLocalDateTime(new Date(entry.id)) : 'Data indisponível'} · {entry.hour} · {entry.description}</small></div></div>
                 ))}
               </section>
             )}
@@ -1775,6 +2203,7 @@ const prescribedMedications = [
 ]
 
 const scheduleHours = ['07:00', '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00', '18:00', '19:00', '20:00', '21:00', '22:00', '23:00', '00:00', '01:00', '02:00', '03:00', '04:00', '05:00', '06:00']
+const prescriptionDisplayHours = [...scheduleHours.slice(1), scheduleHours[0]]
 type MedicationSchedule = Record<number, string[]>
 type SchedulesByBed = Record<string, MedicationSchedule>
 type MedicationOrder = typeof prescribedMedications[number]
@@ -1795,6 +2224,7 @@ type PrescriptionItem = {
 }
 type PrescriptionVersion = {
   id: string
+  prescriptionNumber?: number
   version: number
   createdAt: string
   validFrom: string
@@ -1803,8 +2233,32 @@ type PrescriptionVersion = {
   signedBy: string
   items: PrescriptionItem[]
   legacy?: boolean
+  demonstration?: boolean
+  demonstrationHistory?: boolean
 }
 type PrescriptionVersionsByAdmission = Record<string, PrescriptionVersion[]>
+
+function numberPrescriptionVersions(versionsByAdmission: PrescriptionVersionsByAdmission): PrescriptionVersionsByAdmission {
+  const versions = Object.values(versionsByAdmission).flat()
+  let nextNumber = versions.reduce((max, version) => Math.max(max, version.prescriptionNumber ?? 0), 0)
+  const numbers = new Map<string, number>()
+  versions.filter((version) => !version.prescriptionNumber && !version.legacy)
+    .sort((a, b) => (a.createdAt || '').localeCompare(b.createdAt || '') || a.id.localeCompare(b.id))
+    .forEach((version) => numbers.set(version.id, ++nextNumber))
+  return Object.fromEntries(Object.entries(versionsByAdmission).map(([admission, entries]) => [
+    admission,
+    entries.map((version) => numbers.has(version.id) ? { ...version, prescriptionNumber: numbers.get(version.id) } : version),
+  ]))
+}
+
+function formatPrescriptionNumber(version?: PrescriptionVersion) {
+  return version?.prescriptionNumber ? `Nº ${String(version.prescriptionNumber).padStart(6, '0')}` : 'Sem número · registro legado'
+}
+
+function formatStoredPrescriptionDate(value: string) {
+  const date = new Date(value)
+  return value && !Number.isNaN(date.getTime()) ? formatLocalDateTime(date) : 'Não registrada'
+}
 
 const medicationAllergyAliases: Record<string, string[]> = {
   Amoxicilina: ['penicilina', 'beta-lactâmico'],
@@ -1858,6 +2312,67 @@ function getPrescriptionWindow(now: Date) {
     validFrom: validFrom.toISOString(),
     expiresAt: new Date(validFrom.getTime() + 24 * 60 * 60 * 1000).toISOString(),
   }
+}
+
+function addDemonstrationPrescriptions(
+  existing: PrescriptionVersionsByAdmission,
+  medicationsByBed: Record<string, MedicationOrder[]>,
+  bedMoves: Record<string, string>,
+  outcomes: Record<string, PatientOutcomeRecord>,
+  now: Date,
+): PrescriptionVersionsByAdmission {
+  const updated = { ...existing }
+  const demonstrationPatients = [...patients, ...additionalPatientRecords.slice(0, 3)]
+  const currentWindow = getPrescriptionWindow(now)
+  const makeItems = (patient: Patient, validFrom: string): PrescriptionItem[] => {
+    const id = -(Date.parse(validFrom) * 10 + patient.id * 10)
+    return [
+      { id: id - 1, category: 'Dietas', name: 'Dieta fictícia', details: 'Exemplo demonstrativo, sem orientação assistencial.', status: 'Ativa' },
+      { id: id - 2, category: 'Medicamentos', name: 'Medicamento fictício', details: 'Exemplo demonstrativo, sem dose ou via.', status: 'Ativa' },
+      { id: id - 3, category: 'Exames', name: 'Exame fictício', details: 'Solicitação apenas para demonstração.', status: 'Ativa' },
+      { id: id - 4, category: 'Cuidados Especiais', name: 'Cuidado fictício', details: 'Orientação apenas para demonstração.', status: 'Ativa' },
+    ]
+  }
+
+  demonstrationPatients.forEach((patient) => {
+    const entries = [...(updated[patient.admission] ?? [])]
+    for (const daysAgo of [2, 1]) {
+      const id = `demo-historico-${patient.admission}-${daysAgo}`
+      const existingIndex = entries.findIndex((version) => version.id === id)
+      if (existingIndex >= 0) {
+        if (daysAgo === 2 && entries[existingIndex].demonstrationHistory && entries[existingIndex].status !== 'Vigente') {
+          entries[existingIndex] = { ...entries[existingIndex], status: 'Vigente' }
+        }
+        continue
+      }
+      const date = new Date(currentWindow.validFrom)
+      date.setDate(date.getDate() - daysAgo)
+      const window = getPrescriptionWindow(date)
+      entries.push({
+        id, version: -daysAgo, createdAt: window.validFrom, ...window, status: daysAgo === 2 ? 'Vigente' : 'Suspensa',
+        signedBy: 'Exemplo demonstrativo · sem assinatura clínica', items: makeItems(patient, window.validFrom), demonstration: true, demonstrationHistory: true,
+      })
+    }
+
+    const bed = bedMoves[patient.admission] || patient.bed
+    const legacyMedications = medicationsByBed[bed] ?? (bed === '01' ? prescribedMedications : [])
+    const hasUserVersion = entries.some((version) => !version.demonstration)
+    const hasCurrentExample = entries.some((version) => version.demonstration && !version.demonstrationHistory
+      && version.status === 'Vigente' && Date.parse(version.expiresAt) > now.getTime())
+    const isActiveDemoPatient = patient.bed !== '—' && !outcomes[patient.admission]
+    if (isActiveDemoPatient && !hasUserVersion && !legacyMedications.length && !hasCurrentExample) {
+      const exampleVersions = entries.filter((version) => version.demonstration && !version.demonstrationHistory)
+      entries.push({
+        id: `demo-vigente-${patient.admission}-${currentWindow.validFrom}`,
+        version: Math.max(0, ...exampleVersions.map((version) => version.version)) + 1,
+        createdAt: currentWindow.validFrom, ...currentWindow, status: 'Vigente',
+        signedBy: 'Exemplo demonstrativo · sem assinatura clínica', items: makeItems(patient, currentWindow.validFrom), demonstration: true,
+      })
+    }
+    updated[patient.admission] = entries
+  })
+
+  return numberPrescriptionVersions(updated)
 }
 
 function MedicationPatientBar({ patient = patients[0], risks }: { patient?: Patient; risks?: PatientClinicalRisk }) {
@@ -1933,64 +2448,51 @@ function saveAdministrationRecord(bed: string, key: string, record: Administrati
   localStorage.setItem(`avicen-administration-${bed}`, JSON.stringify({ ...readAdministrationRecords(bed), [key]: record }))
 }
 
-function ScheduleTimeStrip({ times, next, statusOf, onOpen }: { times: string[]; next?: string; statusOf: (time: string) => AdministrationRecord['status'] | undefined; onOpen: (time: string) => void }) {
-  const stripRef = useRef<HTMLDivElement>(null)
-  const scrollStrip = (direction: number) => stripRef.current?.scrollBy({ left: direction * 160, behavior: 'smooth' })
-
-  return (
-    <div className="prescription-time-strip">
-      <button type="button" className="prescription-strip-nav" aria-label="Ver horários anteriores" onClick={() => scrollStrip(-1)}>‹</button>
-      <div className="prescription-time-track" ref={stripRef}>
-        {times.map((time) => {
-          const status = statusOf(time)
-          const stateClass = status === 'Administrado' ? 'checked' : status === 'Não administrado' ? 'bolado' : ''
-          return (
-            <button
-              type="button"
-              key={time}
-              className={`prescription-time-chip ${time === next ? 'next' : ''} ${stateClass}`}
-              title="Duplo clique para checar ou bolar"
-              onDoubleClick={() => onOpen(time)}
-              onKeyDown={(event) => { if (event.key === 'Enter') onOpen(time) }}
-            >
-              <span className="time-icon"><Icon name="clock" size={11} /></span>{time}
-            </button>
-          )
-        })}
-      </div>
-      <button type="button" className="prescription-strip-nav" aria-label="Ver próximos horários" onClick={() => scrollStrip(1)}>›</button>
-    </div>
-  )
-}
-
 function PrescriptionScheduleList({ items, schedule, approved, prescriptionStatus, bed, onNotify, onRecordsChange }: { items: PrescriptionItem[]; schedule: MedicationSchedule; approved: boolean; prescriptionStatus: string; bed: string; onNotify: (message: string) => void; onRecordsChange: () => void }) {
+  const tableScrollRef = useRef<HTMLDivElement>(null)
+  const scrollbarRef = useRef<HTMLDivElement>(null)
+  const [tableWidth, setTableWidth] = useState(0)
   const [dialog, setDialog] = useState<{ item: PrescriptionItem; time: string; key: string } | null>(null)
   const [dialogMode, setDialogMode] = useState<'choose' | 'bolar'>('choose')
   const [reason, setReason] = useState('')
   const [justification, setJustification] = useState('')
   const [dialogError, setDialogError] = useState('')
+  const { records: saeRecords, toggleItem: toggleSaeItem } = useSaeRecords(bed)
+  useEffect(() => {
+    const scroll = tableScrollRef.current
+    const table = scroll?.querySelector('table')
+    if (!scroll || !table) return
+    const updateWidth = () => setTableWidth(scroll.scrollWidth)
+    const observer = new ResizeObserver(updateWidth)
+    observer.observe(scroll)
+    observer.observe(table)
+    updateWidth()
+    return () => observer.disconnect()
+  }, [])
   const records = readAdministrationRecords(bed)
-  const nowMinutes = new Date().getHours() * 60 + new Date().getMinutes()
   const sortedTimes = (itemId: number) => [...(schedule[itemId] ?? [])].sort((a, b) => scheduleHours.indexOf(a) - scheduleHours.indexOf(b))
-  const nextDose = items
-    .filter((item) => item.category === 'Medicamentos' && item.status === 'Ativa')
-    .flatMap((item) => sortedTimes(item.id).map((time) => {
-      const [hour, minute] = time.split(':').map(Number)
-      return { item, time, wait: (hour * 60 + minute - nowMinutes + 1440) % 1440 }
-    }))
-    .sort((a, b) => a.wait - b.wait)[0]
+  const isBlocked = (item: PrescriptionItem) => item.status === 'Suspensa' || prescriptionStatus === 'Suspensa' || prescriptionStatus === 'Expirada'
 
   const closeDialog = () => { setDialog(null); setDialogMode('choose'); setReason(''); setJustification(''); setDialogError('') }
-  const openSchedule = (item: PrescriptionItem, time: string) => {
-    if (!approved) { onNotify('Grade aguardando homologação: somente horários homologados pela enfermeira podem ser checados.'); return }
+  const canRegister = (item: PrescriptionItem, time: string) => {
+    const currentItem = items.find((entry) => entry.id === item.id)
+    if (!currentItem || isBlocked(currentItem)) { onNotify('Este item está suspenso ou a prescrição não está vigente.'); return false }
+    if (!approved) { onNotify('A checagem está disponível para todos os perfis após a homologação do aprazamento pela enfermagem.'); return false }
+    if (!sortedTimes(item.id).includes(time)) { onNotify('Este horário não está mais aprazado.'); return false }
     const key = `${item.id}-${time}`
-    const existing = records[key]
-    if (existing) { onNotify(`${item.name} às ${time}: já registrado como ${existing.status.toLowerCase()}.`); return }
+    const existing = readAdministrationRecords(bed)[key]
+    if (existing) { onNotify(`${item.name} às ${time}: já registrado como ${existing.status.toLowerCase()}.`); return false }
+    return true
+  }
+  const openSchedule = (item: PrescriptionItem, time: string) => {
+    if (!canRegister(item, time)) return
+    const key = `${item.id}-${time}`
     setDialog({ item, time, key })
   }
   const currentTime = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
   const registerCheck = () => {
     if (!dialog) return
+    if (!canRegister(dialog.item, dialog.time)) { closeDialog(); return }
     saveAdministrationRecord(bed, dialog.key, { status: 'Administrado', time: currentTime() })
     onRecordsChange()
     onNotify(`${dialog.item.name} às ${dialog.time}: administração checada.`)
@@ -1999,67 +2501,99 @@ function PrescriptionScheduleList({ items, schedule, approved, prescriptionStatu
   const registerBolar = () => {
     if (!dialog) return
     if (!reason || !justification.trim()) { setDialogError('Selecione um motivo e informe a descrição / justificativa.'); return }
+    if (!canRegister(dialog.item, dialog.time)) { closeDialog(); return }
     saveAdministrationRecord(bed, dialog.key, { status: 'Não administrado', time: currentTime(), reason, justification: justification.trim() })
     onRecordsChange()
     onNotify(`${dialog.item.name} às ${dialog.time}: medicação bolada.`)
     closeDialog()
   }
 
-  let itemNumber = 0
+  let itemNumber = items.some((item) => item.category === 'Dietas') ? 0 : 1
   const groups = prescriptionCategoryOrder.map((category) => ({
     category,
-    items: items.filter((item) => item.category === category),
-  })).filter((group) => group.items.length > 0)
-  const showStatus = (item: PrescriptionItem) => prescriptionStatus === 'Expirada' || prescriptionStatus === 'Suspensa' ? prescriptionStatus : item.status
-
+    items: items.filter((item) => item.category === category).map((item) => ({ item, number: ++itemNumber })),
+  }))
   return (
     <div className="prescription-items-list">
-      {approved && nextDose && (
-        <div className="prescription-next-dose">Próximo horário: <strong>{nextDose.time}</strong> · {nextDose.item.name}</div>
-      )}
-      {groups.map((group) => (
-        <section className="prescription-category-group" key={group.category}>
-          <div className="prescription-category-heading"><strong>{group.category}</strong><span>{group.items.length} item(ns)</span></div>
-          {group.items.map((item) => {
-            itemNumber += 1
-            const status = showStatus(item)
-            const statusClass = status === 'Suspensa' ? 'suspensa' : status === 'Expirada' ? 'expirada' : ''
-            if (item.category !== 'Medicamentos') {
-              const details = item.category === 'Dietas'
-                ? [item.route && `Via ${item.route}`, item.volume, item.speed && `Infusão ${item.speed}`].filter(Boolean).join(' · ')
-                : item.details || '—'
-              return (
-                <div className="prescription-items-table prescription-item-row" key={item.id}>
-                  <span className="prescription-item-number">Item {itemNumber}</span>
-                  <strong>{item.name}</strong>
-                  <span>{details}</span>
-                  <b className={`prescription-item-status ${statusClass}`}>{status}</b>
-                </div>
-              )
-            }
-            const details = [item.dose, item.route && `Via ${item.route}`, item.diluent, item.volume, item.speed, item.frequency, item.details].filter(Boolean).join(' · ')
-            const times = sortedTimes(item.id)
-            return (
-              <div className="prescription-schedule-row" key={item.id}>
-                <div className="prescription-schedule-info">
-                  <span className="prescription-item-number">Item {itemNumber} <b className={`prescription-item-status ${statusClass}`}>{status}</b></span>
-                  <strong>{item.name}</strong>
-                  <span>{details}</span>
-                </div>
-                {times.length
-                  ? <ScheduleTimeStrip
-                      times={times}
-                      next={nextDose && approved && nextDose.item.id === item.id ? nextDose.time : undefined}
-                      statusOf={(time) => records[`${item.id}-${time}`]?.status}
-                      onOpen={(time) => openSchedule(item, time)}
-                    />
-                  : <div className="prescription-time-empty">{approved ? 'Sem horário aprazado' : 'Aguardando aprazamento da enfermagem'}</div>}
-              </div>
-            )
-          })}
-        </section>
-      ))}
-      {!items.length && <div className="medication-empty">Nenhum item de prescrição registrado para este paciente.</div>}
+      <p className="prescription-table-hint">Deslize a tabela para ver os detalhes e todos os horários. Duplo clique ou Enter em um horário aprazado para checar ou bolar.</p>
+      <div className="prescription-table-scroll" ref={tableScrollRef} role="region" aria-label="Tabela da prescrição e horários" tabIndex={0}
+        onScroll={(event) => { if (scrollbarRef.current) scrollbarRef.current.scrollLeft = event.currentTarget.scrollLeft }}>
+        <table className="prescription-grid">
+          <thead>
+            <tr>
+              <th scope="col" className="prescription-grid-number">Nº</th>
+              <th scope="col" className="prescription-grid-item">Item</th>
+              <th scope="col">Dose / volume</th>
+              <th scope="col">Via</th>
+              <th scope="col">Frequência</th>
+              <th scope="col">Diluição</th>
+              <th scope="col">Velocidade</th>
+              <th scope="col">Orientações</th>
+              {prescriptionDisplayHours.map((time) => <th scope="col" className="prescription-grid-hour" key={time}>{time}</th>)}
+            </tr>
+          </thead>
+          {groups.map((group) => (
+            <tbody key={group.category}>
+              <tr className="prescription-grid-category"><th scope="rowgroup" colSpan={32}><span>{group.category}</span></th></tr>
+              {group.items.map(({ item, number }) => {
+                const suspended = item.status === 'Suspensa'
+                const blocked = isBlocked(item)
+                const times = item.category === 'Medicamentos' ? sortedTimes(item.id) : []
+                return (
+                  <tr key={item.id} className={suspended ? 'prescription-grid-suspended' : undefined} aria-label={suspended ? `${item.name}, item suspenso` : undefined} title={suspended ? 'Item suspenso' : undefined}>
+                    <td className="prescription-grid-number">{number}</td>
+                    <th scope="row" className="prescription-grid-item">
+                      <strong>{item.name}</strong>
+                      {!suspended && prescriptionStatus === 'Expirada' && <span className="prescription-item-status expirada">Expirada</span>}
+                      {!blocked && item.category === 'Medicamentos' && !times.length && <small>{approved ? 'Sem horário aprazado' : 'Aguardando aprazamento'}</small>}
+                    </th>
+                    <td>{[item.dose, item.volume].filter(Boolean).join(' · ') || '—'}</td>
+                    <td>{item.route || '—'}</td>
+                    <td>{item.frequency || '—'}</td>
+                    <td>{item.diluent || '—'}</td>
+                    <td>{item.speed || '—'}</td>
+                    <td>{item.details || '—'}</td>
+                    {prescriptionDisplayHours.map((time) => {
+                      const record = records[`${item.id}-${time}`]
+                      const stateClass = record?.status === 'Administrado' ? 'checked' : record?.status === 'Não administrado' ? 'bolado' : ''
+                      return <td className="prescription-grid-hour" key={time}>
+                        {times.includes(time) ? <button
+                          type="button"
+                          className={`prescription-time-chip ${stateClass}`}
+                          aria-label={`${item.name}, ${time}${record ? `, ${record.status}` : ', aprazado'}${blocked ? ', bloqueado' : ''}`}
+                          title={blocked ? 'Item ou prescrição bloqueada' : record ? `${time} · ${record.status} · já registrado` : `${time} · aprazado · duplo clique para checar ou bolar`}
+                          disabled={blocked}
+                          onDoubleClick={() => openSchedule(item, time)}
+                          onKeyDown={(event) => { if (event.key === 'Enter') openSchedule(item, time) }}
+                        >{stateClass === 'checked' ? <Icon name="check" size={24} /> : <span className="time-icon" />}</button> : '—'}
+                      </td>
+                    })}
+                  </tr>
+                )
+              })}
+              {!group.items.length && (group.category === 'Dietas'
+                ? <tr><td className="prescription-grid-number">1</td><td className="prescription-grid-item">Nenhuma dieta registrada</td><td className="prescription-grid-empty" colSpan={30}>O item 1 está reservado para dieta.</td></tr>
+                : <tr><td className="prescription-grid-empty" colSpan={32}>Nenhum item registrado nesta seção.</td></tr>)}
+            </tbody>
+          ))}
+          <tbody>
+            <tr className="prescription-grid-category"><th scope="rowgroup" colSpan={32}><span>SAE · Registros de enfermagem (não são prescrição médica)</span></th></tr>
+            {saeCareItems.map((item, index) => (
+              <tr key={item}>
+                <td className="prescription-grid-number">{itemNumber + index + 1}</td>
+                <th scope="row" className="prescription-grid-item">
+                  <label className="prescription-grid-sae"><input type="checkbox" checked={!!saeRecords[item]} onChange={() => toggleSaeItem(item)} /><span>{item}</span></label>
+                </th>
+                <td colSpan={30} className="prescription-grid-empty">Registro de cuidado de enfermagem, sem horário aprazado.</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="prescription-sticky-scrollbar" ref={scrollbarRef} role="region" aria-label="Rolagem horizontal da prescrição" tabIndex={0}
+        onScroll={(event) => { if (tableScrollRef.current) tableScrollRef.current.scrollLeft = event.currentTarget.scrollLeft }}>
+        <div style={{ width: tableWidth }} />
+      </div>
       {dialog && (
         <div className="confirmation-layer" role="dialog" aria-modal="true" aria-label="Checar ou bolar medicação">
           <Button className="confirmation-backdrop" onClick={closeDialog} ariaLabel="Fechar" />
@@ -2089,7 +2623,7 @@ function PrescriptionScheduleList({ items, schedule, approved, prescriptionStatu
   )
 }
 
-function SAEChecklist({ bed, role }: { bed: string; role: ProfessionalRole }) {
+function useSaeRecords(bed: string) {
   const [records, setRecords] = useState<Record<string, boolean>>(() => {
     try { return JSON.parse(localStorage.getItem(`avicen-sae-${bed}`) || '{}') as Record<string, boolean> } catch { return {} }
   })
@@ -2103,6 +2637,12 @@ function SAEChecklist({ bed, role }: { bed: string; role: ProfessionalRole }) {
     localStorage.setItem(`avicen-sae-${bed}`, JSON.stringify(updated))
     return updated
   })
+
+  return { records, toggleItem }
+}
+
+function SAEChecklist({ bed, role }: { bed: string; role: ProfessionalRole }) {
+  const { records, toggleItem } = useSaeRecords(bed)
 
   return (
     <section className="record-section sae-checklist-card">
@@ -2455,8 +2995,9 @@ function PhysicianPrescriptionScreen({ patient, risks, medications, versions, on
   const [formError, setFormError] = useState('')
   const [historyDays, setHistoryDays] = useState(7)
   const now = new Date()
-  const currentVersion = versions.find((version) => version.status === 'Vigente')
-  const latestVersion = versions.slice().sort((left, right) => {
+  const displayableVersions = versions.filter((version) => !version.demonstrationHistory)
+  const currentVersion = displayableVersions.filter((version) => version.status === 'Vigente').sort((a, b) => b.version - a.version)[0]
+  const latestVersion = displayableVersions.slice().sort((left, right) => {
     const leftTime = left.createdAt ? Date.parse(left.createdAt) : 0
     const rightTime = right.createdAt ? Date.parse(right.createdAt) : 0
     return leftTime - rightTime
@@ -2678,7 +3219,7 @@ function PhysicianPrescriptionScreen({ patient, risks, medications, versions, on
         <div className={`prescription-layout ${formMode ? '' : 'single-column'}`}>
           <section className="record-section medication-list-card prescription-current-card">
             <div className="record-section-head">
-              <div><div className="record-section-title">Itens da prescrição vigente</div><p>{currentItems.filter((item) => item.status === 'Ativa').length} item(ns) ativos · versão {currentVersion?.version ?? latestVersion?.version ?? (currentItems.length ? 'legada' : '—')}</p></div>
+              <div><div className="record-section-title">Itens da prescrição vigente</div><p>{currentItems.filter((item) => item.status === 'Ativa').length} item(ns) ativos · versão {currentVersion?.version ?? latestVersion?.version ?? (currentItems.length ? 'legada' : '—')} · {currentVersion || latestVersion || currentItems.length ? formatPrescriptionNumber(currentVersion ?? latestVersion) : 'Sem prescrição registrada'}</p>{(currentVersion ?? latestVersion)?.demonstration && <p className="prescription-demo-notice">Exemplo fictício para demonstração · não utilizar na assistência.</p>}</div>
               <span className={`prescription-version-status ${currentStatus === 'Vigente' ? 'vigente' : currentStatus === 'Suspensa' ? 'suspensa' : currentStatus === 'Expirada' ? 'expirada' : 'legacy'}`}>{currentStatus}</span>
             </div>
             {currentVersion && <div className="prescription-validity-range">Início: {formatLocalDateTime(new Date(currentVersion.validFrom))} · Término: {formatLocalDateTime(new Date(currentVersion.expiresAt))}</div>}
@@ -2747,7 +3288,7 @@ function PhysicianPrescriptionScreen({ patient, risks, medications, versions, on
             const status = version.status === 'Suspensa' ? 'Suspensa' : expired ? 'Expirada' : 'Vigente'
             return <article className="prescription-history-version" key={version.id}>
               <div className="prescription-history-version-head">
-                <strong>Versão {version.version || 'legada'}</strong>
+                <strong>{version.demonstration ? 'Exemplo fictício' : `Versão ${version.version || 'legada'}`} · {formatPrescriptionNumber(version)}</strong>
                 <span>{version.createdAt ? formatLocalDateTime(new Date(version.createdAt)) : 'Data não disponível · registro legado'}</span>
                 <b className={`prescription-version-status ${status.toLocaleLowerCase('pt-BR')}`}>{status}</b>
               </div>
@@ -4149,7 +4690,11 @@ export default function App() {
   const [selectedPrescriptionAdmission, setSelectedPrescriptionAdmission] = useState<string | null>(null)
   const [medicationsByBed, setMedicationsByBed] = useState<Record<string, MedicationOrder[]>>(() => { try { const saved = localStorage.getItem('avicen-medications-by-bed'); return saved ? JSON.parse(saved) as Record<string, MedicationOrder[]> : { '01': prescribedMedications } } catch { return { '01': prescribedMedications } } })
   const [prescriptionVersionsByAdmission, setPrescriptionVersionsByAdmission] = useState<PrescriptionVersionsByAdmission>(() => {
-    try { return JSON.parse(localStorage.getItem('avicen-prescription-versions-by-admission') || '{}') as PrescriptionVersionsByAdmission } catch { return {} }
+    try {
+      const saved = JSON.parse(localStorage.getItem('avicen-prescription-versions-by-admission') || '{}') as PrescriptionVersionsByAdmission
+      return addDemonstrationPrescriptions(numberPrescriptionVersions(saved), medicationsByBed, patientBedMoves, patientOutcomes, new Date())
+    }
+    catch (error) { console.error('Não foi possível carregar as versões de prescrição.', error); return {} }
   })
   const [schedulesByBed, setSchedulesByBed] = useState<SchedulesByBed>(() => {
     try { return JSON.parse(localStorage.getItem('avicen-medication-schedules') || '{}') as SchedulesByBed } catch { return {} }
@@ -4181,6 +4726,11 @@ export default function App() {
   useEffect(() => { localStorage.setItem('avicen-pending-tasks', JSON.stringify(pendingTasks)) }, [pendingTasks])
   useEffect(() => { localStorage.setItem('avicen-safety-huddle', JSON.stringify(safetyHuddle)) }, [safetyHuddle])
   useEffect(() => {
+    if (Object.values(prescriptionVersionsByAdmission).some((versions) => versions.length)) {
+      localStorage.setItem('avicen-prescription-versions-by-admission', JSON.stringify(prescriptionVersionsByAdmission))
+    }
+  }, [prescriptionVersionsByAdmission])
+  useEffect(() => {
     document.documentElement.dataset.theme = theme
     localStorage.setItem('avicen-theme', theme)
   }, [theme])
@@ -4210,8 +4760,8 @@ export default function App() {
   const availableBedCount = Math.max(0, 10 - activePatients.length)
   const selectedMedicationPatient = activePatients.find((patient) => patient.bed === selectedMedicationBed)
   const selectedPrescriptionPatient = activePatients.find((patient) => patient.admission === selectedPrescriptionAdmission)
-  const selectedPatientVersions = selectedMedicationPatient ? prescriptionVersionsByAdmission[selectedMedicationPatient.admission] ?? [] : []
-  const selectedActivePrescription = selectedPatientVersions.find((version) => version.status === 'Vigente')
+  const selectedPatientVersions = selectedMedicationPatient ? (prescriptionVersionsByAdmission[selectedMedicationPatient.admission] ?? []).filter((version) => !version.demonstrationHistory) : []
+  const selectedActivePrescription = selectedPatientVersions.filter((version) => version.status === 'Vigente').sort((a, b) => b.version - a.version)[0]
   const selectedLatestPrescription = selectedPatientVersions.slice().sort((left, right) => {
     const leftTime = left.createdAt ? Date.parse(left.createdAt) : 0
     const rightTime = right.createdAt ? Date.parse(right.createdAt) : 0
@@ -4229,8 +4779,8 @@ export default function App() {
       : []
     : selectedLegacyMedications
   const pendingSchedulingPatients = activePatients.filter((patient) => {
-    const versions = prescriptionVersionsByAdmission[patient.admission] ?? []
-    const activeVersion = versions.find((version) => version.status === 'Vigente')
+    const versions = (prescriptionVersionsByAdmission[patient.admission] ?? []).filter((version) => !version.demonstrationHistory)
+    const activeVersion = versions.filter((version) => version.status === 'Vigente').sort((a, b) => b.version - a.version)[0]
     const patientMedications = versions.length
       ? activeVersion && Date.parse(activeVersion.expiresAt) > now.getTime()
         ? toMedicationOrders(activeVersion.items)
@@ -4284,12 +4834,14 @@ export default function App() {
     const createdAt = new Date()
     const validity = getPrescriptionWindow(createdAt)
     const currentVersions = prescriptionVersionsByAdmission[admission] ?? []
-    const previousCurrentVersion = currentVersions.find((version) => version.status === 'Vigente')
-    const suspendedVersions = currentVersions.map((version) => version.status === 'Vigente'
+    const previousCurrentVersion = currentVersions.filter((version) => version.status === 'Vigente' && !version.demonstrationHistory).sort((a, b) => b.version - a.version)[0]
+    const suspendedVersions = currentVersions.map((version) => version.status === 'Vigente' && !version.demonstrationHistory
+      && (!version.demonstration || Date.parse(version.expiresAt) > createdAt.getTime())
       ? { ...version, status: 'Suspensa' as const, items: version.items.map((item) => item.status === 'Ativa' ? { ...item, status: 'Suspensa' as const } : item) }
       : version)
     const nextVersion: PrescriptionVersion = {
       id: `${admission}-${createdAt.getTime()}`,
+      prescriptionNumber: Object.values(prescriptionVersionsByAdmission).flat().reduce((max, version) => Math.max(max, version.prescriptionNumber ?? 0), 0) + 1,
       version: Math.max(0, ...currentVersions.map((version) => version.version)) + 1,
       createdAt: createdAt.toISOString(),
       validFrom: validity.validFrom,
@@ -4540,7 +5092,8 @@ export default function App() {
       <div className="main-area">
         <header className="topbar">
           <div className="date-block">
-            <strong>{formatDate(now)}</strong>
+            <strong className="date-full">{formatDate(now)}</strong>
+            <strong className="date-short">{now.toLocaleDateString('pt-BR', { weekday: 'short' })}, {now.toLocaleDateString('pt-BR')}</strong>
             <span>{now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
           </div>
           <div className="topbar-actions">

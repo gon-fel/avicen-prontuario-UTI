@@ -15,16 +15,18 @@ O projeto também é uma oportunidade de praticar Engenharia de Software e integ
 
 ## Funcionalidades demonstradas
 
-- **Painel da UTI:** visão geral dos leitos, pacientes, prioridades e alertas.
-- **Pacientes e prontuário:** consulta de pacientes e visualização de informações do atendimento, incluindo registro demonstrativo de sinais vitais.
-- **Admissão e movimentação:** cadastro demonstrativo, alocação e movimentação entre leitos, riscos clínicos e encerramento de atendimento.
-- **Prescrições:** registro demonstrativo de medicamentos e apresentação de alertas relacionados a alergias.
-- **Aprazamento:** seleção e homologação demonstrativa de horários de medicamentos.
-- **Checagem de enfermagem:** registro demonstrativo de administração ou não administração e marcação de itens da SAE.
-- **Balanço hídrico:** lançamento de entradas e saídas e visualização de saldos calculados na tela.
-- **Dispositivos invasivos:** acompanhamento demonstrativo de inserção, permanência e retirada.
-- **Passagem de plantão:** compilação de informações, dispositivos e pendências para demonstrar a transição de cuidado.
-- **Pendências:** visualização de tarefas atribuídas ao perfil demonstrativo selecionado.
+- **Interface:** temas claro e escuro, ajuste de tamanho de texto e layout adaptável.
+- **Painel da UTI:** ocupação, prioridades e Safety Huddle demonstrativo de pacientes, exames, equipamentos e infraestrutura.
+- **Pacientes e prontuário:** busca, filtros e prontuário em abas, com alertas de alergias e comorbidades e registro demonstrativo de sinais vitais.
+- **Admissão e movimentação:** admissão a partir de dados fictícios da Recepção ou do NIR, alocação e transferência entre leitos. Na alta, o médico registra a decisão, o enfermeiro organiza o destino e o técnico confirma o transporte; no óbito, o prontuário fica restrito à consulta da evolução de óbito.
+- **Prescrições:** médico registra itens de dietas, medicamentos, exames e cuidados especiais; o protótipo verifica correspondências demonstrativas com alergias. A prescrição tem versões locais e histórico de consulta.
+- **Aprazamento e checagem:** o enfermeiro define e homologa horários. Após a homologação, os três perfis podem checar ou registrar a não administração na grade; esta exige motivo e justificativa. Itens suspensos e prescrições suspensas ou expiradas ficam bloqueados para checagem.
+- **Balanço hídrico:** grade horária de entradas e saídas, totais realizados e previstos e homologação pelo enfermeiro. Valores previstos exigem confirmação para se tornarem realizados.
+- **Dispositivos invasivos:** registros demonstrativos de inserção e retirada e consulta de dispositivos ativos ou retirados.
+- **Evoluções:** anotações por perfil, filtro de histórico e validação demonstrativa da anamnese pelo enfermeiro.
+- **Exames:** tabela de consulta de resultados e laudos, com hemograma e ilustrações fictícias de exames de imagem. O registro de resultados e laudos ainda não está disponível.
+- **Passagem de plantão:** resumo editável, dispositivos, pendências, rascunho local e simulação de transmissão e aceite.
+- **Pendências:** tarefas demonstrativas atribuídas ao perfil e profissional selecionados.
 
 Os fluxos e regras exibidos são exemplos para prototipação; não equivalem a protocolos clínicos validados.
 
@@ -60,6 +62,8 @@ pnpm dev
 
 Abra no navegador o endereço local informado pelo Vite no terminal.
 
+No PowerShell do Windows, caso a execução de scripts esteja bloqueada, use `pnpm.cmd install` e `pnpm.cmd dev`.
+
 Para gerar uma versão de produção e testar a compilação:
 
 ```bash
@@ -68,13 +72,20 @@ pnpm build
 
 ### Acesso demonstrativo
 
-Na tela inicial, selecione um perfil e preencha os campos de usuário e senha com valores fictícios. A autenticação é apenas demonstrativa; não há validação de credenciais reais.
+Na tela inicial, use uma das contas fictícias abaixo. O perfil é definido pela conta; a validação é apenas demonstrativa e não oferece segurança real.
+
+| Perfil | Usuário | Senha demonstrativa |
+| --- | --- | --- |
+| Médico | `medico` | `medico123` |
+| Enfermeiro | `enfermeiro` | `enfermeiro123` |
+| Técnico | `tecnico` | `tecnico123` |
 
 ## Persistência e limitações
 
-- Algumas informações do protótipo são guardadas no `localStorage` do navegador. Isso permite demonstrar persistência local, mas não cria um banco de dados institucional nem sincroniza dados entre navegadores ou profissionais.
-- Outros dados existem somente enquanto a tela ou sessão está aberta; por exemplo, os lançamentos do balanço hídrico não são persistidos após sair da tela ou recarregar a página.
+- Algumas informações, incluindo lançamentos e homologações do balanço hídrico, são guardadas no `localStorage` do navegador. Isso permite demonstrar persistência local, mas não cria um banco de dados institucional nem sincroniza dados entre navegadores ou profissionais.
+- Outros dados existem somente enquanto a tela ou sessão está aberta, como a resposta clínica aos alertas e a simulação de transmissão e aceite do plantão. O rascunho do plantão pode ser salvo localmente.
 - Não há backend, autenticação real, controle de acesso seguro, assinatura digital certificada, trilha de auditoria inviolável ou integração com dispositivos e sistemas hospitalares.
+- Os exemplos de exames e imagens são fictícios e não diagnósticos; o histórico de prescrição não reconstrói os horários de versões anteriores.
 - Horários e regras clínicas são demonstrativos e podem depender do relógio e dos dados locais do navegador.
 - O protótipo não substitui avaliação de profissionais, validação institucional, requisitos legais ou protocolos assistenciais.
 
