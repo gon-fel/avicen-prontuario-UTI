@@ -990,7 +990,7 @@ function ClinicalNotesSection({ patient, role, onNotify, anamnesisValidation, on
           <span className={anamnesisValidation ? 'device-status' : 'immutable-chip'}>{anamnesisValidation ? 'Validada' : 'Aguardando validação'}</span>
         </div>
         <div className="nursing-anamnesis-footer">
-          <span>{anamnesisValidation ? `Validada por ${anamnesisValidation.validatedBy} · ${formatLocalDateTime(new Date(anamnesisValidation.validatedAt))}` : 'A validação fica registrada no atendimento e identifica o profissional responsável.'}</span>
+          <span>{anamnesisValidation ? `Validada por ${anamnesisValidation.validatedBy} · ${formatLocalDateTime(new Date(anamnesisValidation.validatedAt))}` : 'A validação será registrada no atendimento, com identificação do profissional responsável.'}</span>
           {role === 'enfermeiro' && <Button className="primary-button" onClick={onValidateAnamnesis}><Icon name="check" size={15} /> {anamnesisValidation ? 'Revalidar anamnese' : 'Validar anamnese de enfermagem'}</Button>}
         </div>
       </section>
@@ -4590,10 +4590,11 @@ function PatientsScreen({ onOpenPatient, onAddPatient, admittedPatients = [], ou
   )
 }
 
-function LoginScreen({ onLogin }: { onLogin: (role: ProfessionalRole) => void }) {
+function LoginScreen({ onLogin, theme, onToggleTheme }: { onLogin: (role: ProfessionalRole) => void; theme: 'dark' | 'light'; onToggleTheme: () => void }) {
   const [registration, setRegistration] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const passwordInputRef = useRef<HTMLInputElement>(null)
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -4613,6 +4614,18 @@ function LoginScreen({ onLogin }: { onLogin: (role: ProfessionalRole) => void })
   return (
     <main className="login-screen">
       <section className="login-brand-panel">
+        <svg className="login-vitals-pattern" viewBox="0 0 800 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true" focusable="false">
+          <defs>
+            <pattern id="login-vitals-repeat" width="720" height="440" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <path d="M0 110h105l18-16 19 32 22-60 22 84 20-40h139l18-16 19 32 22-60 22 84 20-40h139l18-16 19 32 22-60 22 84 20-40h34" fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+            </pattern>
+            <pattern id="login-vitals-repeat-alt" width="720" height="440" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+              <path d="M0 316.6667l3-2.6667 19 32 22-60 22 84 20-40H225l18-16 19 32 22-60 22 84 20-40h139l18-16 19 32 22-60 22 84 20-40h139l15-13.3333" fill="none" stroke="currentColor" strokeWidth="3" vectorEffect="non-scaling-stroke" strokeLinecap="round" strokeLinejoin="round" />
+            </pattern>
+          </defs>
+          <rect width="100%" height="100%" fill="url(#login-vitals-repeat)" />
+          <rect width="100%" height="100%" fill="url(#login-vitals-repeat-alt)" />
+        </svg>
         <div className="login-brand">
           <div className="brand-mark"><Icon name="activity" size={25} /></div>
           <div><div className="brand-name">AVICEN</div><div className="brand-product">UTI ADULTO</div></div>
@@ -4628,14 +4641,36 @@ function LoginScreen({ onLogin }: { onLogin: (role: ProfessionalRole) => void })
         <form className="login-form" onSubmit={handleSubmit}>
           <div className="login-form-heading"><span>ACESSO AO SISTEMA</span><h2>Entrar no AVICEN</h2><p>Informe suas credenciais profissionais para acessar a unidade.</p></div>
           <label htmlFor="login-registration">Usuário</label>
-          <input id="login-registration" autoComplete="username" value={registration} onChange={(event) => setRegistration(event.target.value)} placeholder="Seu usuário de acesso" />
+          <input
+            id="login-registration"
+            autoComplete="username"
+            value={registration}
+            onChange={(event) => setRegistration(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+                event.preventDefault()
+                passwordInputRef.current?.focus()
+              }
+            }}
+            placeholder="Seu usuário de acesso"
+          />
           <label htmlFor="login-password">Senha</label>
-          <input id="login-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Digite sua senha" />
+          <input ref={passwordInputRef} id="login-password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Digite sua senha" />
           {error && <div className="login-error" role="alert">{error}</div>}
           <button className="login-submit" type="submit">Entrar no sistema <Icon name="chevron" size={16}/></button>
           <div className="login-demo-note"><Icon name="shield" size={15}/><span>Protótipo acadêmico: autenticação demonstrativa. Cada usuário entra com seu perfil fixo.</span></div>
         </form>
         <div className="login-unit-footer">HOSPITAL SANTA AURORA <span>·</span> UTI ADULTO · 2º ANDAR</div>
+        <button
+          className="login-theme-toggle"
+          type="button"
+          aria-label={theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'}
+          aria-pressed={theme === 'dark'}
+          title={theme === 'dark' ? 'Ativar tema claro' : 'Ativar tema escuro'}
+          onClick={onToggleTheme}
+        >
+          <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={21} />
+        </button>
       </section>
     </main>
   )
@@ -5044,7 +5079,11 @@ export default function App() {
   }
 
   if (!isAuthenticated) {
-    return <LoginScreen onLogin={(loggedRole) => { setRole(loggedRole); setIsAuthenticated(true); setActiveNav('Painel da UTI') }} />
+    return <LoginScreen
+      theme={theme}
+      onToggleTheme={() => setTheme((current) => current === 'dark' ? 'light' : 'dark')}
+      onLogin={(loggedRole) => { setRole(loggedRole); setIsAuthenticated(true); setActiveNav('Painel da UTI') }}
+    />
   }
 
   const visibleNavItems = role === 'medico' ? physicianNavItems : role === 'enfermeiro' ? nurseNavItems : technicianNavItems

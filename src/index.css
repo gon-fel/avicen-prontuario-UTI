@@ -377,6 +377,9 @@
 .record-section-head { min-height: 57px; display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 11px 15px; border-bottom: 1px solid var(--slate-150); }
 .record-section-title { color: var(--navy-900); font-size: calc((13px) * var(--font-scale, 1)); font-weight: 700; }
 .record-section-head p, .response-head p { margin: 3px 0 0; color: var(--slate-500); font-size: calc((8px) * var(--font-scale, 1)); }
+.nursing-anamnesis-card, .clinical-note-form { margin-bottom: 12px; }
+.nursing-anamnesis-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; padding: 12px 15px; color: var(--slate-600); }
+.nursing-anamnesis-footer > span { min-width: 0; flex: 1 1 240px; font-size: calc((9px) * var(--font-scale, 1)); line-height: 1.5; }
 .last-update { display: flex; align-items: center; gap: 6px; color: var(--slate-500); font-size: calc((8px) * var(--font-scale, 1)); }
 .last-update > span { width: 6px; height: 6px; border-radius: 50%; background: var(--green-700); box-shadow: 0 0 0 3px var(--green-100); }
 .trend-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; padding: 12px 14px 10px; }
@@ -1387,16 +1390,19 @@
 
 
 /* Initial authentication screen — AVICEN */
-.login-screen { min-height: 100vh; display: grid; grid-template-columns: minmax(360px, 1fr) minmax(420px, 1fr); background: var(--white); }
-.login-brand-panel { min-height: 100vh; display: flex; flex-direction: column; justify-content: space-between; padding: 38px clamp(32px, 6vw, 88px); color: var(--on-accent); background: var(--navy-900); }
-.login-brand { display: flex; align-items: center; gap: 12px; }
-.login-brand-copy { max-width: 540px; margin: auto 0; padding: 70px 0; }
+.login-screen { min-height: 100vh; display: grid; grid-template-columns: minmax(360px, 1.25fr) minmax(420px, 1fr); background: var(--white); }
+.login-brand-panel { position: relative; isolation: isolate; min-height: 100vh; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden; padding: 38px clamp(32px, 6vw, 88px); color: var(--on-accent); background: var(--navy-900); }
+.login-vitals-pattern { position: absolute; z-index: 0; inset: 0; width: 100%; height: 100%; color: var(--teal-600); opacity: .16; pointer-events: none; }
+[data-theme='light'] .login-vitals-pattern { color: #77d0c8; opacity: .2; }
+.login-brand-panel::after { position: absolute; z-index: 1; inset: 0; background: linear-gradient(to bottom, rgba(0, 0, 0, .34), transparent 24%, transparent 76%, rgba(0, 0, 0, .34)); content: ''; pointer-events: none; }
+.login-brand { position: relative; z-index: 2; width: fit-content; display: flex; align-items: center; gap: 12px; margin: -9px -12px; padding: 9px 12px; border-radius: var(--radius-md); }
+.login-brand-copy { position: relative; z-index: 2; max-width: 540px; margin: auto 0; padding: 70px 0; }
 .login-eyebrow { color: #77d0c8; font-size: calc((10px) * var(--font-scale, 1)); font-weight: 750; letter-spacing: .16em; }
 .login-brand-copy h1 { margin: 18px 0 15px; color: var(--on-accent); font-size: calc((clamp(30px, 3.2vw, 48px)) * var(--font-scale, 1)); line-height: 1.13; letter-spacing: -.04em; }
 .login-brand-copy p { max-width: 440px; color: #c0d0d9; font-size: calc((14px) * var(--font-scale, 1)); line-height: 1.8; }
-.login-brand-footer { display: flex; align-items: center; gap: 9px; color: #b4c6d0; font-size: calc((10px) * var(--font-scale, 1)); }
+.login-brand-footer { position: relative; z-index: 2; display: flex; align-items: center; gap: 9px; color: #b4c6d0; font-size: calc((10px) * var(--font-scale, 1)); }
 .login-brand-footer .icon { color: #71cfc5; }
-.login-form-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 42px 32px 24px; background: var(--slate-50); }
+.login-form-panel { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 42px 32px 24px; background: var(--slate-50); }
 .login-form { width: min(100%, 410px); display: flex; flex-direction: column; }
 .login-form-heading { margin-bottom: 30px; }
 .login-form-heading > span { color: var(--teal-700); font-size: calc((9px) * var(--font-scale, 1)); font-weight: 750; letter-spacing: .13em; }
@@ -1412,6 +1418,9 @@
 .login-demo-note .icon { flex: 0 0 auto; color: var(--teal-700); }
 .login-unit-footer { margin-top: auto; padding-top: 45px; color: var(--slate-500); font-size: calc((8px) * var(--font-scale, 1)); font-weight: 700; letter-spacing: .1em; }
 .login-unit-footer span { padding: 0 5px; color: var(--teal-700); }
+.login-theme-toggle { position: absolute; right: 22px; bottom: 20px; width: 44px; height: 44px; display: grid; place-items: center; color: #fff; border: 1px solid currentColor; border-radius: 50%; background: transparent; cursor: pointer; transition: background .15s ease, transform .15s ease; }
+.login-theme-toggle:hover { background: color-mix(in srgb, currentColor 10%, transparent); transform: translateY(-1px); }
+[data-theme='light'] .login-theme-toggle { color: #111416; }
 @media (max-width: 760px) { .login-screen { grid-template-columns: 1fr; } .login-brand-panel { min-height: 270px; padding: 25px; } .login-brand-copy { padding: 35px 0 20px; } .login-brand-copy h1 { font-size: calc((30px) * var(--font-scale, 1)); } .login-brand-footer { display: none; } .login-form-panel { min-height: 520px; padding: 35px 22px 22px; } }
 
 .form-error { margin: 8px 0 0; color: var(--red-600); font-size: calc((9px) * var(--font-scale, 1)); font-weight: 650; line-height: 1.4; }
@@ -1497,6 +1506,8 @@
   .record-warning { position: static; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 16px; }
   .record-warning > :first-child, .record-warning > :nth-child(3), .record-warning > :last-child { grid-column: 1; }
   .record-warning .warning-separator { display: none; }
+  .warning-primary > div, .warning-secondary > div { min-width: 0; }
+  .warning-primary strong, .warning-secondary strong { white-space: normal; overflow-wrap: anywhere; }
   .patient-hero { grid-template-columns: 64px minmax(0, 1fr); }
   .record-person { min-width: 0; padding: 12px; }
   .record-diagnosis { grid-column: 1 / -1; border-top: 1px solid var(--slate-200); border-left: 0; }
@@ -1599,11 +1610,12 @@
 .clinical-filter { display: flex; flex-wrap: wrap; gap: 6px; }
 .clinical-filter button { padding: 6px 10px; color: var(--slate-600); border: 1px solid var(--slate-300); border-radius: 999px; background: var(--white); font-size: calc((8px) * var(--font-scale, 1)); cursor: pointer; }
 .clinical-filter button.active { color: var(--teal-700); border-color: var(--teal-600); background: var(--teal-50); font-weight: 700; }
-.evolution-entry { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 12px 0; border-top: 1px solid var(--slate-200); }
+.clinical-history .record-section-head { flex-wrap: wrap; }
+.evolution-entry { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 12px 15px; border-top: 1px solid var(--slate-200); }
 .clinical-note-kind { color: var(--teal-700); font-size: calc((8px) * var(--font-scale, 1)); font-weight: 700; text-transform: uppercase; }
 .clinical-note-content { min-width: 0; }
 .clinical-note-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; color: var(--slate-500); font-size: calc((8px) * var(--font-scale, 1)); }
-.clinical-note-content p { margin: 6px 0 0; color: var(--slate-700); font-size: calc((9px) * var(--font-scale, 1)); line-height: 1.6; white-space: pre-wrap; }
+.clinical-note-content p { margin: 6px 0 0; color: var(--slate-700); font-size: calc((9px) * var(--font-scale, 1)); line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .exam-table-wrap, .exam-parameters-wrap { max-width: 100%; overflow-x: auto; }
 .exam-table, .exam-parameters { width: 100%; border-collapse: collapse; color: var(--slate-700); font-size: calc((9px) * var(--font-scale, 1)); text-align: left; }
@@ -1617,12 +1629,13 @@
 .exam-image-action { padding: 0 9px; font-size: calc((8px) * var(--font-scale, 1)); font-weight: 700; }
 .exam-action:hover, .exam-image-action:hover { background: var(--teal-50); }
 .exam-demo-notice, .exam-load-error { padding: 10px; border-radius: var(--radius-sm); font-size: calc((9px) * var(--font-scale, 1)); line-height: 1.5; }
-.exam-demo-notice { color: var(--amber-700); background: var(--amber-100); }
+.exam-demo-notice { margin: 12px 15px 0; color: var(--amber-700); background: var(--amber-100); }
 .exam-load-error { color: var(--red-700); background: var(--red-100); }
 .exam-result { display: grid; gap: 14px; margin-top: 14px; padding: 0 15px 15px; color: var(--slate-700); font-size: calc((9px) * var(--font-scale, 1)); }
 .exam-result > div > span { color: var(--slate-500); font-size: calc((8px) * var(--font-scale, 1)); font-weight: 700; text-transform: uppercase; }
 .exam-result p { margin: 5px 0 0; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .exam-result > button { justify-self: start; }
+.exam-images { padding: 14px 15px 15px; }
 .exam-images > p { color: var(--slate-700); font-size: calc((9px) * var(--font-scale, 1)); }
 .exam-image-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .exam-image-grid figure { margin: 0; }
@@ -1631,6 +1644,8 @@
 
 @media (max-width: 760px) {
   .evolution-entry { grid-template-columns: 1fr; gap: 6px; }
+  .nursing-anamnesis-footer { align-items: stretch; }
+  .nursing-anamnesis-footer .primary-button { width: 100%; justify-content: center; }
   .exam-table, .exam-table tbody, .exam-table tr, .exam-table td { display: block; }
   .exam-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .exam-table tr { margin-bottom: 10px; padding: 6px 10px; border: 1px solid var(--slate-200); border-radius: var(--radius-sm); }
