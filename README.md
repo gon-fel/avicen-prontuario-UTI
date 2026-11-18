@@ -69,6 +69,10 @@ pnpm build
 ### Acesso demonstrativo
 
 Na tela inicial, selecione um perfil e preencha os campos de usuário e senha com valores fictícios. A autenticação é apenas demonstrativa; não há validação de credenciais reais.
+Para validação e usabilidade do sistema entre:
+usuário: medico. senha: medico123
+usuário: enfermeiro. senha: enfermeiro123
+usuário: tecnico. senha: tecnico123
 
 ## Persistência e limitações
 
