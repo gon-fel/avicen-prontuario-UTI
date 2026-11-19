@@ -3666,25 +3666,32 @@ function DeviceTrackingScreen({ onNotify, devices, setDevices, patient, role }: 
 }
 
 type HandoffDraft = { diagnosis: string; summary: string; deviceNotes: string; vasoactive: string; tasks: string }
-type DraftGuard = { hasUnsaved: boolean; saveDraft: () => void }
+type DraftGuard = { hasUnsaved: boolean; saveDraft: () => boolean }
 
 const handoffDraftKey = (admission: string) => `avicen-handoff-draft-${admission}`
 const handoffSnapshot = (draft: HandoffDraft) => JSON.stringify([draft.diagnosis, draft.summary, draft.deviceNotes, draft.vasoactive, draft.tasks])
 const readHandoffDraft = (admission: string): HandoffDraft | null => {
   try {
     const raw = localStorage.getItem(handoffDraftKey(admission))
-    return raw ? JSON.parse(raw) as HandoffDraft : null
-  } catch {
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || !('diagnosis' in parsed) || !('summary' in parsed) || !('deviceNotes' in parsed) || !('vasoactive' in parsed) || !('tasks' in parsed) ||
+      typeof parsed.diagnosis !== 'string' || typeof parsed.summary !== 'string' || typeof parsed.deviceNotes !== 'string' || typeof parsed.vasoactive !== 'string' || typeof parsed.tasks !== 'string') {
+      throw new Error('Rascunho com formato inválido.')
+    }
+    return { diagnosis: parsed.diagnosis, summary: parsed.summary, deviceNotes: parsed.deviceNotes, vasoactive: parsed.vasoactive, tasks: parsed.tasks }
+  } catch (error) {
+    console.error('Não foi possível ler o rascunho da passagem de plantão.', error)
     return null
   }
 }
 
-function ShiftHandoffScreen({ role, onNotify, activePatients, devices, pendingTasks, draftGuard }: { role: ProfessionalRole; onNotify: (message: string) => void; activePatients: Patient[]; devices: InvasiveDevice[]; pendingTasks: PendingTask[]; draftGuard: RefObject<DraftGuard | null> }) {
+function ShiftHandoffScreen({ role, onNotify, activePatients, devices, pendingTasks, getPatientRisks, draftGuard }: { role: ProfessionalRole; onNotify: (message: string) => void; activePatients: Patient[]; devices: InvasiveDevice[]; pendingTasks: PendingTask[]; getPatientRisks: (admission: string) => PatientClinicalRisk; draftGuard: RefObject<DraftGuard | null> }) {
   const handoffPatients = activePatients
   const [selectedPatientId, setSelectedPatientId] = useState(1)
   const selectedPatient = handoffPatients.find((patient) => patient.id === selectedPatientId) ?? handoffPatients[0]
   const [initialDraft] = useState(() => readHandoffDraft(selectedPatient.admission))
-  const [diagnosis, setDiagnosis] = useState(initialDraft?.diagnosis ?? 'Choque séptico de foco pulmonar, em resposta parcial às medidas instituídas.')
+  const [diagnosis, setDiagnosis] = useState(initialDraft?.diagnosis ?? selectedPatient.diagnosis)
   const [summary, setSummary] = useState(initialDraft?.summary ?? '')
   const activePatientDevices = devices.filter((device) => device.admission === selectedPatient.admission && !device.removed)
   const deviceSummary = activePatientDevices.map((device) => `${device.type} — ${device.site}`).join('; ') || 'Nenhum dispositivo invasivo ativo registrado.'
@@ -3692,21 +3699,32 @@ function ShiftHandoffScreen({ role, onNotify, activePatients, devices, pendingTa
   const [vasoactive, setVasoactive] = useState(initialDraft?.vasoactive ?? '')
   const [tasks, setTasks] = useState(initialDraft?.tasks ?? '')
   const [saved, setSaved] = useState(Boolean(initialDraft))
-  const [savedSnapshot, setSavedSnapshot] = useState<string | null>(initialDraft ? handoffSnapshot(initialDraft) : null)
+  const [savedSnapshot, setSavedSnapshot] = useState(() => handoffSnapshot(initialDraft ?? { diagnosis: selectedPatient.diagnosis, summary: '', deviceNotes: '', vasoactive: '', tasks: '' }))
   const [handoffStatus, setHandoffStatus] = useState<'draft' | 'transmitted' | 'completed'>('draft')
   const [transferHistory, setTransferHistory] = useState<string[]>([])
+  const [reviewedAdmissions, setReviewedAdmissions] = useState<string[]>([])
+  const [report, setReport] = useState<{ generatedAt: Date; drafts: Record<string, HandoffDraft> } | null>(null)
   const professional = professionals[role]
   const patientPendingTasks = pendingTasks.filter((task) => task.bed === selectedPatient.bed && !task.done)
   const readiness = { diagnosis: Boolean(selectedPatient.diagnosis), devices: activePatientDevices.length > 0 || deviceNotes.trim().length > 0, pending: patientPendingTasks.length === 0 || tasks.trim().length > 0, summary: summary.trim().length > 0 }
   const isReady = Object.values(readiness).every(Boolean)
   const currentDraft: HandoffDraft = { diagnosis, summary, deviceNotes, vasoactive, tasks }
-  const hasUnsavedDraft = handoffStatus === 'draft' && Boolean(summary.trim() || tasks.trim() || deviceNotes.trim() || vasoactive.trim()) && savedSnapshot !== handoffSnapshot(currentDraft)
+  const hasUnsavedDraft = savedSnapshot !== handoffSnapshot(currentDraft)
+  const allReviewed = handoffPatients.length > 0 && handoffPatients.every((patient) => reviewedAdmissions.includes(patient.admission)) && !hasUnsavedDraft
 
   const saveHandoff = () => {
-    localStorage.setItem(handoffDraftKey(selectedPatient.admission), JSON.stringify(currentDraft))
+    try {
+      localStorage.setItem(handoffDraftKey(selectedPatient.admission), JSON.stringify(currentDraft))
+    } catch (error) {
+      console.error('Não foi possível salvar o rascunho da passagem de plantão.', error)
+      onNotify('Não foi possível salvar o rascunho neste navegador.')
+      return false
+    }
     setSaved(true)
     setSavedSnapshot(handoffSnapshot(currentDraft))
+    setReviewedAdmissions((current) => current.includes(selectedPatient.admission) ? current : [...current, selectedPatient.admission])
     onNotify('Passagem de plantão salva como rascunho.')
+    return true
   }
 
   useEffect(() => {
@@ -3716,22 +3734,36 @@ function ShiftHandoffScreen({ role, onNotify, activePatients, devices, pendingTa
   useEffect(() => () => { draftGuard.current = null }, [draftGuard])
 
   const switchPatient = (patient: Patient) => {
+    if (patient.id === selectedPatient.id) return
+    if (hasUnsavedDraft) {
+      onNotify('Salve o rascunho antes de trocar de paciente.')
+      return
+    }
     const stored = readHandoffDraft(patient.admission)
     setSelectedPatientId(patient.id)
-    setDiagnosis(stored?.diagnosis ?? `${patient.diagnosis}. Quadro em acompanhamento intensivo.`)
+    setDiagnosis(stored?.diagnosis ?? patient.diagnosis)
     setSummary(stored?.summary ?? '')
     setTasks(stored?.tasks ?? '')
     setDeviceNotes(stored?.deviceNotes ?? '')
     setVasoactive(stored?.vasoactive ?? '')
     setHandoffStatus('draft')
     setSaved(Boolean(stored))
-    setSavedSnapshot(stored ? handoffSnapshot(stored) : null)
+    setSavedSnapshot(handoffSnapshot(stored ?? { diagnosis: patient.diagnosis, summary: '', deviceNotes: '', vasoactive: '', tasks: '' }))
   }
 
-  const importEvolution = () => {
-    const latestVitals = (() => { try { const rows = JSON.parse(localStorage.getItem(`avicen-vitals-${selectedPatient.admission}`) || '[]') as Array<{at:string; values:Record<string,string>}>; const latest = rows[rows.length - 1]; return latest ? ` Última aferição (${latest.at}): ${Object.entries(latest.values).map(([key, value]) => `${key}: ${value}`).join(', ')}.` : ' Não há aferições manuais registradas.' } catch { return ' Não há aferições manuais registradas.' } })()
-    setSummary(`Resumo compilado em ${formatLocalDateTime(new Date())}: ${selectedPatient.name} apresenta ${selectedPatient.diagnosis.toLocaleLowerCase('pt-BR')}.${latestVitals} Conteúdo editável; registros originais preservados.`)
-    onNotify('Resumo da última evolução importado. O registro original foi preservado.')
+  const openReport = () => {
+    if (!allReviewed) return
+    const drafts: Record<string, HandoffDraft> = {}
+    for (const patient of handoffPatients) {
+      const draft = readHandoffDraft(patient.admission)
+      if (!draft) {
+        setReviewedAdmissions((current) => current.filter((admission) => admission !== patient.admission))
+        onNotify(`Não foi possível ler o rascunho do leito ${patient.bed}. Revise e salve novamente.`)
+        return
+      }
+      drafts[patient.admission] = draft
+    }
+    setReport({ generatedAt: new Date(), drafts })
   }
 
   const transmitHandoff = () => {
@@ -3743,8 +3775,7 @@ function ShiftHandoffScreen({ role, onNotify, activePatients, devices, pendingTa
       onNotify('Esta transmissão já foi assinada e não pode ser sobrescrita silenciosamente.')
       return
     }
-    setSaved(true)
-    localStorage.removeItem(handoffDraftKey(selectedPatient.admission))
+    if (!saveHandoff()) return
     setHandoffStatus('transmitted')
     setTransferHistory((current) => [...current, `Transmitido por ${professional.name} · ${professional.registry} · ${formatLocalDateTime(new Date())}`])
     onNotify('Plantão transmitido e aguardando aceite do receptor.')
@@ -3760,6 +3791,41 @@ function ShiftHandoffScreen({ role, onNotify, activePatients, devices, pendingTa
     onNotify('Turno aceito, homologado e assinado pelo receptor.')
   }
 
+  if (report) {
+    return (
+      <main className="handoff-report-page">
+        <div className="handoff-report-actions">
+          <Button className="secondary-button" onClick={() => setReport(null)}>Voltar às fichas</Button>
+          <Button className="primary-button" onClick={() => window.print()}><Icon name="document" size={15} /> Imprimir ou salvar em PDF</Button>
+        </div>
+        <article className="handoff-report">
+          <header>
+            <h1>Passagem de plantão · UTI Adulto</h1>
+            <p>Gerado em {formatLocalDateTime(report.generatedAt)} · {handoffPatients.length} paciente(s)</p>
+            <p>Protótipo acadêmico · dados fictícios · não utilizar na assistência. Confira as informações antes da passagem oral.</p>
+          </header>
+          {handoffPatients.map((patient) => {
+            const draft = report.drafts[patient.admission]
+            const patientDevices = devices.filter((device) => device.admission === patient.admission && !device.removed)
+            const risks = getPatientRisks(patient.admission)
+            const allergies = risks.allergies.length
+              ? risks.allergies.map((allergy) => [allergy.substance, allergy.reaction, allergy.severity].filter(Boolean).join(' · ')).join('; ')
+              : risks.allergiesReviewed ? 'Nenhuma alergia conhecida na admissão' : 'Nenhuma alergia registrada'
+            return <section className="handoff-report-patient" key={patient.admission}>
+              <h2>Leito {patient.bed} · {patient.name}</h2>
+              <p><strong>Hipótese diagnóstica / diagnóstico:</strong> {patient.diagnosis || 'Não registrado'}</p>
+              <p><strong>Tempo de internação:</strong> {patient.stay || 'Não registrado'}</p>
+              <p><strong>Dispositivos invasivos ativos:</strong> {patientDevices.length ? patientDevices.map((device) => `${device.type} — ${device.site}`).join('; ') : 'Nenhum dispositivo ativo registrado'}</p>
+              <p><strong>Alergias:</strong> {allergies}</p>
+              <p><strong>Medicações / drogas em infusão contínua (anotação manual):</strong> {draft?.vasoactive.trim() || 'Não informado'}</p>
+              <p><strong>Pendências (anotação manual):</strong> {draft?.tasks.trim() || 'Não informado'}</p>
+            </section>
+          })}
+        </article>
+      </main>
+    )
+  }
+
   return (
     <main className="clinical-module-page">
       <div className="clinical-module-content">
@@ -3768,13 +3834,14 @@ function ShiftHandoffScreen({ role, onNotify, activePatients, devices, pendingTa
           <div className="handoff-heading-actions">
             <span className={`handoff-state ${handoffStatus === 'completed' ? 'reviewed' : handoffStatus === 'transmitted' || (saved && !hasUnsavedDraft) ? 'saved' : ''}`}><Icon name={handoffStatus === 'completed' ? 'check' : 'document'} size={14} />{handoffStatus === 'completed' ? 'Turno homologado' : handoffStatus === 'transmitted' ? 'Aguardando receptor' : saved && !hasUnsavedDraft ? 'Rascunho salvo' : 'Rascunho não salvo'}</span>
             <Button className="secondary-button" onClick={saveHandoff}><Icon name="document" size={15} /> Salvar rascunho</Button>
-            <Button className="primary-button" onClick={importEvolution}><Icon name="document" size={15} /> Importar Resumo da Última Evolução</Button>
+            <Button className="primary-button" disabled={!allReviewed} onClick={openReport}><Icon name="document" size={15} /> Exportar passagem de plantão</Button>
           </div>
         </div>
+        <p className="handoff-export-hint">Revise cada paciente e salve seu rascunho para liberar o relatório. {handoffPatients.filter((patient) => reviewedAdmissions.includes(patient.admission)).length} de {handoffPatients.length} revisados nesta visita.</p>
         <div className="handoff-bed-carousel">
-          {handoffPatients.map((patient) => { const tasksForPatient = pendingTasks.filter((task) => task.bed === patient.bed && !task.done); const hasVitals = (() => { try { return (JSON.parse(localStorage.getItem(`avicen-vitals-${patient.admission}`) || '[]') as unknown[]).length > 0 } catch { return false } })(); const ready = Boolean(patient.diagnosis && (hasVitals || devices.some((device) => device.admission === patient.admission)) && tasksForPatient.length === 0); return <Button className={selectedPatient.id === patient.id ? 'active' : ''} onClick={() => switchPatient(patient)} key={patient.id}><span>L{patient.bed}</span><strong>{patient.initials}</strong><small className={ready ? 'ready' : 'pending'}>{ready ? 'Pronto' : 'Pendente'}</small></Button> })}
+          {handoffPatients.map((patient) => { const reviewed = reviewedAdmissions.includes(patient.admission) && !(patient.id === selectedPatient.id && hasUnsavedDraft); return <Button className={selectedPatient.id === patient.id ? 'active' : ''} onClick={() => switchPatient(patient)} key={patient.id}><span>L{patient.bed}</span><strong>{patient.initials}</strong><small className={reviewed ? 'ready' : 'pending'}>{reviewed ? 'Revisado' : 'Revisar'}</small></Button> })}
         </div>
-        <MedicationPatientBar patient={selectedPatient} />
+        <MedicationPatientBar patient={selectedPatient} risks={getPatientRisks(selectedPatient.admission)} />
 
         <div className="handoff-layout">
           <section className="handoff-main">
@@ -3795,18 +3862,19 @@ function ShiftHandoffScreen({ role, onNotify, activePatients, devices, pendingTa
               <div className="handoff-active-devices">
                 {activePatientDevices.map((device) => <span key={device.id}><Icon name="device" size={13} />{device.type}<b>{device.site}</b></span>)}{!activePatientDevices.length && <span>Nenhum dispositivo ativo registrado para este atendimento.</span>}
               </div>
-              <label><span>Observações sobre dispositivos</span><textarea value={deviceNotes || deviceSummary} onChange={(event) => setDeviceNotes(event.target.value)} /></label>
+              <label><span>Observações sobre dispositivos</span><textarea value={deviceNotes} placeholder={deviceSummary} onChange={(event) => setDeviceNotes(event.target.value)} /></label>
             </section>
 
             <section className="record-section handoff-form">
               <div className="handoff-section-head"><span>3</span><div><strong>Drogas vasoativas e infusões críticas</strong><small>Dose atual, meta e cuidados na continuidade</small></div></div>
-              <div className="vasoactive-banner"><Icon name="medication" size={18} /><div><strong>Infusões críticas registradas</strong><span>Consulte a prescrição e os registros de infusão do atendimento selecionado.</span></div><b>REGISTROS</b></div>
-              <label><span>Orientações para continuidade</span><textarea value={vasoactive} onChange={(event) => setVasoactive(event.target.value)} placeholder="Consolide as drogas vasoativas e infusões a partir dos registros do paciente." /></label>
+              <div className="vasoactive-banner"><Icon name="medication" size={18} /><div><strong>Conferência das infusões</strong><span>Consulte os registros do paciente e preencha as informações manualmente.</span></div><b>REVISAR</b></div>
+              <label><span>Medicações e drogas em infusão contínua (registro manual)</span><textarea value={vasoactive} onChange={(event) => setVasoactive(event.target.value)} placeholder="Informe as medicações em uso e os dados disponíveis para a passagem." /></label>
             </section>
 
             <section className="record-section handoff-form">
               <div className="handoff-section-head"><span>4</span><div><strong>Pendências e plano para o próximo turno</strong><small>Exames, reavaliações e tarefas com horário definido</small></div></div>
-              <label><span>Pendências prioritárias (derivadas dos registros)</span><textarea className="tasks" value={tasks || patientPendingTasks.map((task) => `• ${task.task} — ${task.due}`).join('\n') || 'Nenhuma pendência aberta registrada para este leito.'} onChange={(event) => setTasks(event.target.value)} /></label>
+              {patientPendingTasks.length > 0 && <p className="handoff-existing-tasks">Pendências abertas no sistema: {patientPendingTasks.map((task) => `${task.task} — ${task.due}`).join('; ')}</p>}
+              <label><span>Pendências para a passagem (registro manual)</span><textarea className="tasks" value={tasks} onChange={(event) => setTasks(event.target.value)} placeholder="Anote as pendências a comunicar ao próximo plantão." /></label>
             </section>
           </section>
 
@@ -5034,6 +5102,10 @@ export default function App() {
   }
 
   const handleNavigation = (label: string) => {
+    if (activeNav === 'Passagem de plantão' && label !== activeNav && draftGuardRef.current?.hasUnsaved) {
+      setNotice('Salve o rascunho da passagem de plantão antes de sair da página.')
+      return
+    }
     const availableItems = role === 'medico' ? physicianNavItems : role === 'enfermeiro' ? nurseNavItems : technicianNavItems
     if (!availableItems.some((item) => item.label === label)) {
       setNotice(`O módulo ${label} não está disponível para o perfil ${professionals[role].title.toLowerCase()}.`)
@@ -5240,7 +5312,7 @@ export default function App() {
             approveMedicationSchedule()
           }} />
         ) : activeNav === 'Passagem de plantão' ? (
-          <ShiftHandoffScreen role={role} onNotify={setNotice} activePatients={activePatients} devices={invasiveDevices} pendingTasks={pendingTasks} draftGuard={draftGuardRef} />
+          activePatients.length ? <ShiftHandoffScreen role={role} onNotify={setNotice} activePatients={activePatients} devices={invasiveDevices} pendingTasks={pendingTasks} getPatientRisks={getPatientRisks} draftGuard={draftGuardRef} /> : <main className="clinical-module-page"><div className="clinical-module-content">Não há pacientes internados para a passagem de plantão.</div></main>
         ) : <main className="dashboard">
           <div className="page-heading">
             <div>
@@ -5262,7 +5334,7 @@ export default function App() {
         </main>}
       </div>
 
-      {logoutDialogOpen && <ConfirmationDialog title="Sair com rascunho não salvo?" description="A passagem de plantão em edição ainda não foi salva. Salve como rascunho para retomá-la depois ou saia sem salvar." confirmLabel="Salvar rascunho e sair" alternateLabel="Sair sem salvar" onAlternate={logout} onCancel={() => setLogoutDialogOpen(false)} onConfirm={() => { draftGuardRef.current?.saveDraft(); logout() }} />}
+      {logoutDialogOpen && <ConfirmationDialog title="Sair com rascunho não salvo?" description="A passagem de plantão em edição ainda não foi salva. Salve como rascunho para retomá-la depois ou saia sem salvar." confirmLabel="Salvar rascunho e sair" alternateLabel="Sair sem salvar" onAlternate={logout} onCancel={() => setLogoutDialogOpen(false)} onConfirm={() => { if (draftGuardRef.current?.saveDraft()) logout() }} />}
       <PendingTaskPanel open={pendingOpen} onClose={() => setPendingOpen(false)} onNotify={setNotice} role={role} tasks={pendingTasks} setTasks={setPendingTasks} />
       {safetyHuddleOpen && <SafetyHuddleUpdateDialog activePatients={activePatients} huddle={safetyHuddle} onClose={() => setSafetyHuddleOpen(false)} onSave={(updated) => { setSafetyHuddle(updated); setSafetyHuddleOpen(false); setNotice('Safety Huddle atualizado para o próximo ciclo de 12 horas.') }} />}
       {notice && <div className="toast"><Icon name="check" size={17} /><span>{notice}</span></div>}

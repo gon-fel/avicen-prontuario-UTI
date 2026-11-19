@@ -1015,6 +1015,28 @@
 .culture-checkbox span { margin: 0 !important; }
 .handoff-heading-actions { display: flex; align-items: center; gap: 7px; }
 .handoff-heading-actions .primary-button, .handoff-heading-actions .secondary-button { flex: 0 0 auto; min-height: 35px; }
+.handoff-export-hint, .handoff-existing-tasks { margin: 0 0 9px; color: var(--slate-600); font-size: calc(9px * var(--font-scale, 1)); line-height: 1.5; }
+.handoff-existing-tasks { margin: 11px 0 0; }
+.handoff-report-page { padding: 24px 30px 40px; }
+.handoff-report-actions { max-width: 1000px; display: flex; flex-wrap: wrap; gap: 8px; margin: 0 auto 16px; }
+.handoff-report { max-width: 1000px; margin: 0 auto; padding: 28px; color: #17212b; background: #fff; border: 1px solid #d5dde2; border-radius: 8px; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.handoff-report h1 { margin: 0 0 8px; font-size: 22px; }
+.handoff-report header p { margin: 4px 0; }
+.handoff-report-patient { margin-top: 20px; padding-top: 14px; border-top: 1px solid #aebac3; break-inside: avoid; }
+.handoff-report-patient h2 { margin: 0 0 8px; font-size: 17px; }
+.handoff-report-patient p { margin: 5px 0; white-space: pre-wrap; }
+@media (max-width: 760px) {
+  .handoff-report-page { padding: 16px; }
+  .handoff-report { padding: 18px; }
+  .handoff-report-actions > button { flex: 1 1 100%; }
+}
+@media print {
+  body:has(.handoff-report) .sidebar, body:has(.handoff-report) .sidebar-backdrop, body:has(.handoff-report) .topbar,
+  body:has(.handoff-report) .handoff-report-actions, body:has(.handoff-report) .toast { display: none !important; }
+  body:has(.handoff-report) .app-shell, body:has(.handoff-report) .main-area { min-height: 0; margin: 0; background: #fff; }
+  .handoff-report-page { padding: 0; }
+  .handoff-report { max-width: none; padding: 0; border: 0; border-radius: 0; font-size: 10pt; }
+}
 .handoff-state { display: flex; align-items: center; gap: 5px; padding: 6px 8px; color: var(--slate-600); border-radius: 10px; background: var(--slate-100); font-size: calc((7px) * var(--font-scale, 1)); font-weight: 700; }
 .handoff-state.saved { color: var(--amber-700); background: var(--amber-100); }
 .handoff-state.reviewed { color: var(--green-700); background: var(--green-100); }

@@ -25,7 +25,7 @@ O projeto também é uma oportunidade de praticar Engenharia de Software e integ
 - **Dispositivos invasivos:** registros demonstrativos de inserção e retirada e consulta de dispositivos ativos ou retirados.
 - **Evoluções:** anotações por perfil, filtro de histórico e validação demonstrativa da anamnese pelo enfermeiro.
 - **Exames:** tabela de consulta de resultados e laudos, com hemograma e ilustrações fictícias de exames de imagem. O registro de resultados e laudos ainda não está disponível.
-- **Passagem de plantão:** resumo editável, dispositivos, pendências, rascunho local e simulação de transmissão e aceite.
+- **Passagem de plantão:** revisão por paciente, rascunhos locais e relatório único para impressão ou PDF com dados dos pacientes ativos e anotações manuais. A transmissão e o aceite continuam sendo simulações opcionais.
 - **Pendências:** tarefas demonstrativas atribuídas ao perfil e profissional selecionados.
 
 Os fluxos e regras exibidos são exemplos para prototipação; não equivalem a protocolos clínicos validados.
@@ -84,6 +84,7 @@ Na tela inicial, use uma das contas fictícias abaixo. O perfil é definido pela
 
 - Algumas informações, incluindo lançamentos e homologações do balanço hídrico, são guardadas no `localStorage` do navegador. Isso permite demonstrar persistência local, mas não cria um banco de dados institucional nem sincroniza dados entre navegadores ou profissionais.
 - Outros dados existem somente enquanto a tela ou sessão está aberta, como a resposta clínica aos alertas e a simulação de transmissão e aceite do plantão. O rascunho do plantão pode ser salvo localmente.
+- Para exportar a passagem, revise e salve o rascunho de cada paciente ativo durante a visita à tela. A revisão é reiniciada ao sair da tela, mas os rascunhos permanecem no navegador. Medicações em infusão e pendências do relatório são anotações manuais; os dados apresentados devem ser conferidos.
 - Não há backend, autenticação real, controle de acesso seguro, assinatura digital certificada, trilha de auditoria inviolável ou integração com dispositivos e sistemas hospitalares.
 - Os exemplos de exames e imagens são fictícios e não diagnósticos; o histórico de prescrição não reconstrói os horários de versões anteriores.
 - Horários e regras clínicas são demonstrativos e podem depender do relógio e dos dados locais do navegador.
